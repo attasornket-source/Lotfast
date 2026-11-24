@@ -34,7 +34,7 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: npx tsx --test src/utils/calculator.test.ts src/utils/quoteParser.test.ts
+        run: npx tsx --test src/utils/calculator.test.ts src/utils/quoteParser.test.ts src/utils/yahooProto.test.ts
 
       - name: Build production PWA
         run: npm run build

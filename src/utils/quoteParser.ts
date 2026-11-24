@@ -6,8 +6,10 @@ import {
 } from '../config/tradingConfig';
 
 export type QuoteProvenance =
+  | 'vantage_mt5_direct'
+  | 'vantage_ws_calibrated'
+  | 'live_ws_bbo'
   | 'vantage_live'
-  | 'live_stream'
   | 'live_derived'
   | 'delayed_derived'
   | 'cached'
@@ -26,10 +28,20 @@ export interface MarketQuote {
   spreadFormatted: string;
   provenance: QuoteProvenance;
   sourceLabel: string;
-  /** เวลาที่ดึงราคาสำเร็จล่าสุด (ms) */
+  /** เวลาที่ราคาอัปเดตล่าสุด (ms) */
   fetchedAt: number;
   /** ทิศทางการขยับเทียบกับราคาก่อนหน้า */
   tickDirection: 'up' | 'down' | 'flat';
+  /** นับจำนวน tick ที่วิ่งเข้ามาจริง (ช่วยกระตุ้น flash animation ทุก tick) */
+  tickSeq: number;
+  /** ประวัติราคา mid ล่าสุดสูงสุด 24 จุดสำหรับกราฟ Sparkline */
+  sparkline: number[];
+}
+
+export interface VantageSpreadAnchor {
+  spreadAbs: number;
+  vantageMid: number;
+  updatedAt: number;
 }
 
 export interface RawScannerRow {
@@ -41,9 +53,6 @@ export interface RawScannerRow {
   update_mode?: string | null;
 }
 
-/**
- * คืนค่าสตริง Ticker ที่ใช้ยิงขอราคาจาก TradingView Scanner ตามบัญชี Vantage ที่เลือก
- */
 export function resolveFeedTicker(
   pair: PairSpec,
   accountType: VantageAccountType
@@ -54,9 +63,6 @@ export function resolveFeedTicker(
   return pair.feedSymbol;
 }
 
-/**
- * แปลงค่าสเปรดเป็นข้อความอ่านง่ายตามประเภทสินทรัพย์
- */
 export function formatSpreadLabel(
   bid: number,
   ask: number,
@@ -67,7 +73,7 @@ export function formatSpreadLabel(
 
   if (pair.category === 'forex') {
     const pips = diff / (pair.pointSize * pair.pointsPerPip);
-    return { spreadPoints, spreadFormatted: `${pips.toFixed(1)} pip` };
+    return { spreadPoints, spreadFormatted: `${pips.toFixed(1)}p` };
   }
   if (pair.quoteType === 'STOCK_USD') {
     return { spreadPoints, spreadFormatted: `$${diff.toFixed(2)}` };
@@ -76,84 +82,91 @@ export function formatSpreadLabel(
     return { spreadPoints, spreadFormatted: `฿${diff.toFixed(2)}` };
   }
   if (pair.category === 'index') {
-    return { spreadPoints, spreadFormatted: `${diff.toFixed(1)} pts` };
+    return { spreadPoints, spreadFormatted: `${diff.toFixed(1)}pt` };
   }
   return { spreadPoints, spreadFormatted: `$${diff.toFixed(2)}` };
 }
 
+export function appendSparkline(prev: number[] | undefined, value: number): number[] {
+  const arr = Array.isArray(prev) ? prev.slice(-23) : [];
+  if (!Number.isFinite(value) || value <= 0) return arr;
+  arr.push(value);
+  return arr;
+}
+
 /**
- * แปลงข้อมูลดิบจาก TradingView Scanner / Binance ให้เป็น Bid/Offer ที่ปลอดภัย
- * - ตรวจจับ Bid/Ask ที่กลับด้าน (ask < bid)
- * - ตรวจจับ Bid/Ask ที่ค้างห่างจากราคาล่าสุด (close) เกิน 0.15% (เช่น OANDA CFD นอกเวลา)
- *   แล้วคำนวณ Bid/Offer อิงราคา Close สด ± Vantage Typical Spread พร้อมระบุ Provenance ชัดเจน
+ * สร้าง MarketQuote จาก WebSocket Tick แบบเรียลไทม์ทุกวินาที
+ * โดยนำค่า Spread จริงล่าสุดจาก Vantage Anchor มาคาลิเบรต Bid/Offer ให้แม่นยำตรงโบรกเกอร์
  */
-export function normalizeScannerQuote(params: {
+export function buildStreamingTickQuote(params: {
   pair: PairSpec;
-  raw: RawScannerRow;
+  mid?: number;
+  directBid?: number;
+  directAsk?: number;
+  changePct?: number | null;
+  changeAbs?: number | null;
+  vantageAnchor?: VantageSpreadAnchor | null;
   accountType: VantageAccountType;
   now: number;
-  prevMid?: number;
-  overrideDirectSourceLabel?: string;
+  prevQuote?: MarketQuote | null;
+  provenance: QuoteProvenance;
+  sourceLabel: string;
 }): MarketQuote | null {
-  const { pair, raw, accountType, now, prevMid, overrideDirectSourceLabel } = params;
-  const close = typeof raw.close === 'number' && Number.isFinite(raw.close) && raw.close > 0 ? raw.close : null;
-  const rawBid = typeof raw.bid === 'number' && Number.isFinite(raw.bid) && raw.bid > 0 ? raw.bid : null;
-  const rawAsk = typeof raw.ask === 'number' && Number.isFinite(raw.ask) && raw.ask > 0 ? raw.ask : null;
-  const updateMode = (raw.update_mode ?? '').toLowerCase();
-  const isDelayed = updateMode.includes('delayed');
-
-  // ตรวจสอบว่า Bid/Ask ดิบมีอยู่จริง ไม่กลับด้าน และไม่ค้างห่างจากราคา Close สดเกิน 0.15%
-  const hasSaneBidAsk =
-    rawBid !== null &&
-    rawAsk !== null &&
-    rawAsk >= rawBid &&
-    (close === null || Math.abs((rawBid + rawAsk) / 2 - close) / close <= 0.0015);
+  const {
+    pair,
+    mid: rawMid,
+    directBid,
+    directAsk,
+    changePct,
+    changeAbs,
+    vantageAnchor,
+    now,
+    prevQuote,
+    provenance,
+    sourceLabel,
+  } = params;
 
   let bid: number;
   let ask: number;
-  let provenance: QuoteProvenance;
-  let sourceLabel: string;
 
-  if (hasSaneBidAsk && rawBid !== null && rawAsk !== null) {
-    bid = rawBid;
-    ask = rawAsk;
-    if (overrideDirectSourceLabel) {
-      provenance = 'live_stream';
-      sourceLabel = overrideDirectSourceLabel;
-    } else if (pair.isDirectVantageFeed) {
-      provenance = 'vantage_live';
-      sourceLabel = accountType === 'STD' ? 'Vantage STD Live' : 'Vantage RAW Live';
-    } else {
-      provenance = 'live_stream';
-      sourceLabel = 'Live Market B/A';
-    }
-  } else if (close !== null) {
-    // Derive realistic Bid/Offer symmetrically around live close using Vantage typical spread
-    const halfSpread = (pair.typicalSpreadPoints * pair.pointSize) / 2;
-    bid = Math.max(pair.pointSize, close - halfSpread);
-    ask = close + halfSpread;
-    if (isDelayed) {
-      provenance = 'delayed_derived';
-      sourceLabel = 'Delayed 15m · Est. B/A';
-    } else {
-      provenance = 'live_derived';
-      sourceLabel = pair.isIndex || pair.category === 'metal'
-        ? 'Live CFD · Vantage Spread'
-        : 'Live Last · Est. B/A';
-    }
+  if (
+    typeof directBid === 'number' &&
+    typeof directAsk === 'number' &&
+    Number.isFinite(directBid) &&
+    Number.isFinite(directAsk) &&
+    directBid > 0 &&
+    directAsk >= directBid
+  ) {
+    bid = directBid;
+    ask = directAsk;
+  } else if (typeof rawMid === 'number' && Number.isFinite(rawMid) && rawMid > 0) {
+    const spreadAbs =
+      vantageAnchor && vantageAnchor.spreadAbs > 0
+        ? vantageAnchor.spreadAbs
+        : pair.typicalSpreadPoints * pair.pointSize;
+    const half = spreadAbs / 2;
+    bid = Math.max(pair.pointSize, rawMid - half);
+    ask = rawMid + half;
   } else {
     return null;
   }
 
   const mid = (bid + ask) / 2;
   const { spreadPoints, spreadFormatted } = formatSpreadLabel(bid, ask, pair);
+
+  const prevMid = prevQuote?.mid;
+  const priceChanged =
+    !prevQuote ||
+    Math.abs(bid - prevQuote.bid) > 1e-9 ||
+    Math.abs(ask - prevQuote.ask) > 1e-9;
+
   const tickDirection: 'up' | 'down' | 'flat' =
     typeof prevMid === 'number' && prevMid > 0
       ? mid > prevMid + 1e-9
         ? 'up'
         : mid < prevMid - 1e-9
           ? 'down'
-          : 'flat'
+          : prevQuote?.tickDirection ?? 'flat'
       : 'flat';
 
   return {
@@ -161,22 +174,103 @@ export function normalizeScannerQuote(params: {
     bid,
     ask,
     mid,
-    changePct: typeof raw.change === 'number' && Number.isFinite(raw.change) ? raw.change : null,
+    changePct:
+      typeof changePct === 'number' && Number.isFinite(changePct)
+        ? changePct
+        : prevQuote?.changePct ?? null,
     changeAbs:
-      typeof raw.change_abs === 'number' && Number.isFinite(raw.change_abs)
-        ? raw.change_abs
-        : null,
+      typeof changeAbs === 'number' && Number.isFinite(changeAbs)
+        ? changeAbs
+        : prevQuote?.changeAbs ?? null,
     spreadPoints,
     spreadFormatted,
     provenance,
     sourceLabel,
     fetchedAt: now,
     tickDirection,
+    tickSeq: priceChanged ? (prevQuote?.tickSeq ?? 0) + 1 : prevQuote?.tickSeq ?? 0,
+    sparkline: priceChanged
+      ? appendSparkline(prevQuote?.sparkline, mid)
+      : prevQuote?.sparkline?.length
+        ? prevQuote.sparkline
+        : [mid],
   };
 }
 
 /**
- * แยกตัวเลขราคาเป็น 3 ส่วนเหมือนหน้าจอ MT5 / Dealing Desk (ส่วนหน้า, เลข Pip ใหญ่, เลข Pipette เล็ก)
+ * แปลงข้อมูลจาก TradingView Scanner (ใช้เป็น Vantage Spread Anchor และ Initial Snapshot)
+ */
+export function normalizeScannerQuote(params: {
+  pair: PairSpec;
+  raw: RawScannerRow;
+  accountType: VantageAccountType;
+  now: number;
+  prevQuote?: MarketQuote | null;
+  overrideDirectSourceLabel?: string;
+}): MarketQuote | null {
+  const { pair, raw, accountType, now, prevQuote, overrideDirectSourceLabel } = params;
+  const close =
+    typeof raw.close === 'number' && Number.isFinite(raw.close) && raw.close > 0
+      ? raw.close
+      : null;
+  const rawBid =
+    typeof raw.bid === 'number' && Number.isFinite(raw.bid) && raw.bid > 0
+      ? raw.bid
+      : null;
+  const rawAsk =
+    typeof raw.ask === 'number' && Number.isFinite(raw.ask) && raw.ask > 0
+      ? raw.ask
+      : null;
+  const updateMode = (raw.update_mode ?? '').toLowerCase();
+  const isDelayed = updateMode.includes('delayed');
+
+  const hasSaneBidAsk =
+    rawBid !== null &&
+    rawAsk !== null &&
+    rawAsk >= rawBid &&
+    (close === null || Math.abs((rawBid + rawAsk) / 2 - close) / close <= 0.0015);
+
+  if (hasSaneBidAsk && rawBid !== null && rawAsk !== null) {
+    const label =
+      overrideDirectSourceLabel ??
+      (pair.isDirectVantageFeed
+        ? accountType === 'STD'
+          ? 'Vantage STD'
+          : 'Vantage RAW'
+        : 'Market B/A');
+    return buildStreamingTickQuote({
+      pair,
+      directBid: rawBid,
+      directAsk: rawAsk,
+      changePct: raw.change ?? null,
+      changeAbs: raw.change_abs ?? null,
+      accountType,
+      now,
+      prevQuote,
+      provenance: pair.isDirectVantageFeed ? 'vantage_live' : 'live_ws_bbo',
+      sourceLabel: label,
+    });
+  }
+
+  if (close !== null) {
+    return buildStreamingTickQuote({
+      pair,
+      mid: close,
+      changePct: raw.change ?? null,
+      changeAbs: raw.change_abs ?? null,
+      accountType,
+      now,
+      prevQuote,
+      provenance: isDelayed ? 'delayed_derived' : 'live_derived',
+      sourceLabel: isDelayed ? 'Delayed 15m' : 'CFD · Vantage Spread',
+    });
+  }
+
+  return null;
+}
+
+/**
+ * แยกตัวเลขราคาเป็น 3 ส่วนเหมือนหน้าจอ MT5 / cTrader Dealing Desk
  */
 export function splitDealingPrice(
   price: number,
@@ -187,7 +281,6 @@ export function splitDealingPrice(
   }
   const formatted = price.toFixed(decimals);
   if (decimals >= 3) {
-    // เช่น 159.094 -> prefix "159.", big "09", super "4" หรือ 1.31158 -> "1.31", "15", "8"
     return {
       prefix: formatted.slice(0, -3),
       bigDigits: formatted.slice(-3, -1),
@@ -201,7 +294,6 @@ export function splitDealingPrice(
       superDigit: '',
     };
   }
-  // 1 decimal เช่น 49770.6 -> "497", "70.6"
   return {
     prefix: formatted.slice(0, Math.max(0, formatted.length - 4)),
     bigDigits: formatted.slice(Math.max(0, formatted.length - 4)),
@@ -210,10 +302,11 @@ export function splitDealingPrice(
 }
 
 /**
- * ประเมินสถานะความสดใหม่ของราคาตลาด เพื่อแจ้งเตือนเมื่อราคาค้างหรือเชื่อมต่อไม่ได้
+ * ประเมินความสดใหม่ของราคาตลาด (ตรวจจับเมื่อ WebSocket หลุดหรือราคาค้างเกิน 12/25 วินาที)
  */
 export function evaluateFeedHealth(params: {
   isOnline: boolean;
+  wsConnected: boolean;
   lastSuccessAt: number | null;
   consecutiveErrors: number;
   now: number;
@@ -223,13 +316,13 @@ export function evaluateFeedHealth(params: {
   ageSeconds: number | null;
   alertMessage: string;
 } {
-  const { isOnline, lastSuccessAt, consecutiveErrors, now, activeQuote } = params;
+  const { isOnline, wsConnected, lastSuccessAt, consecutiveErrors, now, activeQuote } = params;
 
   if (!isOnline) {
     return {
       state: 'OFFLINE',
       ageSeconds: lastSuccessAt ? Math.max(0, Math.floor((now - lastSuccessAt) / 1000)) : null,
-      alertMessage: 'อุปกรณ์ออฟไลน์ — ราคาหยุดอัปเดต (โหมด USD Loss ยังคำนวณ Lot ได้ปกติ)',
+      alertMessage: 'อุปกรณ์ออฟไลน์ — ราคาหยุดอัปเดต (โหมด USD Loss ยังคำนวณได้ปกติ)',
     };
   }
 
@@ -237,14 +330,14 @@ export function evaluateFeedHealth(params: {
   const ageMs = refTimestamp ? Math.max(0, now - refTimestamp) : null;
   const ageSeconds = ageMs !== null ? Math.floor(ageMs / 1000) : null;
 
-  if (consecutiveErrors >= 2) {
+  if (consecutiveErrors >= 2 && !wsConnected) {
     return {
       state: 'ERROR',
       ageSeconds,
       alertMessage:
         ageSeconds !== null
-          ? `เชื่อมต่อฟีดราคาไม่ได้ (ค้างมาแล้ว ${ageSeconds} วินาที) — แตะรีเฟรชเพื่อลองใหม่`
-          : 'ไม่สามารถเชื่อมต่อฟีดราคาตลาดได้ในขณะนี้',
+          ? `ฟีดราคาหลุดการเชื่อมต่อ (ค้าง ${ageSeconds} วิ) — แตะเชื่อมต่อใหม่`
+          : 'ไม่สามารถเชื่อมต่อฟีดราคาสดได้ในขณะนี้',
     };
   }
 
@@ -252,7 +345,7 @@ export function evaluateFeedHealth(params: {
     return {
       state: 'STALE',
       ageSeconds,
-      alertMessage: `แจ้งเตือน: ราคาตลาดไม่อัปเดตมาแล้ว ${ageSeconds} วินาที — กรุณาตรวจสอบราคาใน MT5 ก่อนออกออเดอร์`,
+      alertMessage: `ราคาไม่ขยับมาแล้ว ${ageSeconds} วิ — โปรดเช็กราคาจริงบน MT5 ก่อนเข้าออเดอร์`,
     };
   }
 
@@ -263,10 +356,10 @@ export function evaluateFeedHealth(params: {
   ) {
     const msg =
       activeQuote?.provenance === 'delayed_derived'
-        ? 'ราคาหุ้นอ้างอิงจากตลาดหลักทรัพย์ (ดีเลย์ ~15 นาที) — ควรดูราคา Bid/Offer จริงบน MT5 ควบคู่'
+        ? 'ราคาตลาดหุ้นดีเลย์ ~15 นาที — ดู Bid/Offer จริงบน MT5 ควบคู่'
         : ageSeconds !== null
-          ? `ราคาอัปเดตช้ากว่าปกติ (${ageSeconds} วินาทีที่แล้ว)`
-          : 'กำลังใช้ราคาล่าสุดจากแคช';
+          ? `ราคาอัปเดตช้า (${ageSeconds} วิที่แล้ว)`
+          : 'กำลังเชื่อมต่อสตรีมราคาสด...';
     return {
       state: 'DELAYED',
       ageSeconds,
@@ -281,9 +374,6 @@ export function evaluateFeedHealth(params: {
   };
 }
 
-/**
- * สร้างลิงก์เปิดแอป MetaTrader 5 บน iPhone / Web
- */
 export function buildMt5LaunchUrl(mode: Mt5LaunchMode): string {
   if (mode === 'universal') {
     return 'https://download.terminal.free/cdn/mobile/mt5/ios?server=VantageInternational-Live';
@@ -294,10 +384,6 @@ export function buildMt5LaunchUrl(mode: Mt5LaunchMode): string {
   return 'metatrader5://';
 }
 
-/**
- * สร้างลิงก์เปิดกราฟ TradingView ตรงไปยังคู่เงิน/หุ้นที่เลือกอยู่
- * (บน iPhone iOS Universal Link จะเปิดเข้าแอป TradingView โดยตรงอัตโนมัติ)
- */
 export function buildTradingViewUrl(pair: PairSpec): string {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(pair.tvSymbol)}`;
 }

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- *  LOTFAST v2.0.0 — TRADING CONFIGURATION & MULTI-ASSET CATALOG
+ *  LOTFAST v2.1.0 — TRADING CONFIGURATION & MULTI-ASSET STREAMING CATALOG
  *  แก้ไขเวอร์ชัน, โบรกเกอร์ Vantage, คู่เงินหลัก, หุ้น และรหัส PIN ได้ที่นี่
  * ============================================================================
  */
@@ -19,6 +19,13 @@ export type InputMode = 'USD' | 'PTS';
 export type VantageAccountType = 'RAW' | 'STD';
 export type Mt5LaunchMode = 'app_scheme' | 'universal' | 'web_terminal';
 
+export interface MetaApiDirectConfig {
+  enabled: boolean;
+  token: string;
+  accountId: string;
+  region: 'new-york' | 'london' | 'singapore' | 'vint-hill';
+}
+
 export interface PairSpec {
   id: PairId;
   /** ชื่อย่อแสดงบนปุ่มกด 1 แตะ */
@@ -29,17 +36,23 @@ export interface PairSpec {
   category: AssetCategory;
   /** สัญลักษณ์สำหรับเปิดกราฟบน TradingView (iOS Universal Link) */
   tvSymbol: string;
-  /** ฟีดราคาหลักแบบ Live สำหรับ TradingView Scanner (กรณี Vantage Raw ECN) */
+  /** ฟีดราคาอ้างอิง/สเปรด Vantage บน TradingView Scanner (Raw ECN) */
   feedSymbol: string;
-  /** ฟีดราคา Vantage Standard STP (มี .TV ต่อท้ายสำหรับคู่ Forex บน Vantage) */
+  /** ฟีดราคา Vantage Standard STP (.TV) */
   vantageStdFeedSymbol?: string;
-  /** สัญลักษณ์บน Binance สำหรับ Crypto Bid/Ask ระดับมิลลิวินาที */
+  /** สัญลักษณ์ WebSocket หลักบน Yahoo Finance Streamer (อัปเดตทุกวินาที) */
+  yahooSymbol?: string;
+  /** สัญลักษณ์ ETF/Proxy ความเร็วสูงบน Yahoo WS (เช่น DIA สำหรับ US30) */
+  yahooProxySymbol?: string;
+  /** สัญลักษณ์ WebSocket Level-1 BBO บน Kraken (ทุกมิลลิวินาที) */
+  krakenSymbol?: string;
+  /** สัญลักษณ์ WebSocket BookTicker บน Binance (ทุกมิลลิวินาทีสำหรับ Crypto) */
   binanceSymbol?: string;
-  /** ระบุว่าฟีดนี้เป็นราคา Bid/Ask ตรงจาก Vantage หรือไม่ */
+  /** ระบุว่าฟีดสเปรดอ้างอิงตรงจาก Vantage หรือไม่ */
   isDirectVantageFeed?: boolean;
   /** จำนวนทศนิยมราคาที่แสดงบนจอ Bid/Offer */
   priceDecimals: number;
-  /** สเปรดอ้างอิงของ Vantage (หน่วยเป็น MT5 Points) ใช้เมื่อตลาดหุ้นส่งเฉพาะ Last Price */
+  /** สเปรดอ้างอิงของ Vantage (หน่วยเป็น MT5 Points) */
   typicalSpreadPoints: number;
   /** ขนาดไม้ที่ 1 ที่ล็อกไว้ตามระบบเทรด */
   firstLot: number;
@@ -49,7 +62,7 @@ export interface PairSpec {
   lotStep: number;
   /** ขนาด Lot สูงสุดต่อออเดอร์ (กันพิมพ์ผิด) */
   maxLot: number;
-  /** จำนวนทศนิยมของ Lot (0 สำหรับหุ้นเต็มหน่วย, 1 สำหรับ US30, 2 สำหรับ Forex) */
+  /** จำนวนทศนิยมของ Lot */
   lotDecimals: number;
   /** Contract Size ของโบรกเกอร์ Vantage */
   contractSize: number;
@@ -61,11 +74,8 @@ export interface PairSpec {
   pointHint: string;
   placeholderUsd: string;
   placeholderPts: string;
-  /** ใช้โทนสี Amber เตือนสายตาสำหรับดัชนี (Step 0.1) */
   isIndex: boolean;
-  /** ระบุว่าเป็นสินทรัพย์ที่ผู้ใช้เพิ่มเองหรือไม่ */
   isCustom?: boolean;
-  /** หน่วยปริมาณ เช่น "Lot" หรือ "หุ้น" */
   unitLabel?: string;
 }
 
@@ -90,37 +100,34 @@ export interface Mt5Option {
 
 export const APP_CONFIG = {
   /** อัปเดตเลขเวอร์ชันนี้ทุกครั้งที่มีการแก้ไขเพื่อติดตามเวอร์ชันบน iPhone */
-  VERSION: 'v2.0.0',
-  RELEASE_DATE: '2026-11-24',
+  VERSION: 'v2.1.0',
+  RELEASE_DATE: '2026-11-25',
   APP_NAME: 'LotFast',
   BROKER_NAME: 'Vantage Markets (USD)',
 
   /** รหัส PIN เริ่มต้น (สามารถเปลี่ยนใหม่ในหน้าตั้งค่าบนเครื่องได้) */
   DEFAULT_PIN: '0808',
 
-  /** คงสถานะปลดล็อกไว้นานกี่นาที (ป้องกันล็อกซ้ำระหว่างสลับแอปไป MT5) */
+  /** คงสถานะปลดล็อกไว้นานกี่นาที */
   SESSION_TIMEOUT_MINUTES: 60,
 
   /** Risk Limit เริ่มต้นต่อการเทรด 1 ชุด (ไม้ 1 + ไม้ 2) */
   DEFAULT_RISK_USD: 30,
 
-  /** ปุ่มเลือก Risk ด่วน */
   RISK_PRESETS: [15, 30, 50, 100] as const,
-
-  /** ปุ่มเลือกอัตราส่วน Target / Stop-Loss (R:R) แบบด่วน */
   RR_PRESETS: ['1:1.5', '1:2', '1:3'] as const,
 
-  /** ความถี่ในการอัปเดตราคา Real-time (ms) และเกณฑ์แจ้งเตือนราคาค้าง (ms) */
-  QUOTE_POLL_INTERVAL_MS: 4000,
-  QUOTE_STALE_WARN_MS: 18_000,
-  QUOTE_STALE_CRITICAL_MS: 30_000,
+  /** ความถี่ในการเทียบสเปรด Vantage (ms) และเกณฑ์แจ้งเตือนราคาค้าง (ms) */
+  VANTAGE_ANCHOR_POLL_MS: 8000,
+  METAAPI_POLL_MS: 1000,
+  QUOTE_STALE_WARN_MS: 12_000,
+  QUOTE_STALE_CRITICAL_MS: 25_000,
 
-  /** อัตราแลกเปลี่ยนสำรองกรณีออฟไลน์สมบูรณ์ */
   FALLBACK_RATES: {
-    USDJPY: 159.1,
-    GBPUSD: 1.3116,
-    GBPJPY: 208.68,
-    USDTHB: 33.94,
+    USDJPY: 159.27,
+    GBPUSD: 1.3118,
+    GBPJPY: 208.92,
+    USDTHB: 33.93,
   },
 
   /** 4 คู่เงินหลักเริ่มต้นตามสเปก Vantage Markets บัญชี USD */
@@ -134,6 +141,7 @@ export const APP_CONFIG = {
       tvSymbol: 'VANTAGE:USDJPY',
       feedSymbol: 'VANTAGE:USDJPY',
       vantageStdFeedSymbol: 'VANTAGE:USDJPY.TV',
+      yahooSymbol: 'JPY=X',
       isDirectVantageFeed: true,
       priceDecimals: 3,
       typicalSpreadPoints: 4,
@@ -161,6 +169,7 @@ export const APP_CONFIG = {
       tvSymbol: 'VANTAGE:GBPUSD',
       feedSymbol: 'VANTAGE:GBPUSD',
       vantageStdFeedSymbol: 'VANTAGE:GBPUSD.TV',
+      yahooSymbol: 'GBPUSD=X',
       isDirectVantageFeed: true,
       priceDecimals: 5,
       typicalSpreadPoints: 4,
@@ -188,6 +197,7 @@ export const APP_CONFIG = {
       tvSymbol: 'VANTAGE:GBPJPY',
       feedSymbol: 'VANTAGE:GBPJPY',
       vantageStdFeedSymbol: 'VANTAGE:GBPJPY.TV',
+      yahooSymbol: 'GBPJPY=X',
       isDirectVantageFeed: true,
       priceDecimals: 3,
       typicalSpreadPoints: 10,
@@ -214,9 +224,11 @@ export const APP_CONFIG = {
       category: 'index',
       tvSymbol: 'VANTAGE:DJ30',
       feedSymbol: 'OANDA:US30USD',
+      yahooSymbol: '^DJI',
+      yahooProxySymbol: 'DIA',
       isDirectVantageFeed: false,
       priceDecimals: 1,
-      typicalSpreadPoints: 200, // 2.0 index pts (Vantage DJ30 typical spread)
+      typicalSpreadPoints: 200,
       firstLot: 0.1,
       minLot: 0.1,
       lotStep: 0.1,
@@ -235,9 +247,7 @@ export const APP_CONFIG = {
   ] as PairSpec[],
 } as const;
 
-/** คลังสินทรัพย์และหุ้นยอดนิยมที่ผู้ใช้กดเพิ่มได้ใน 1 แตะ */
 export const PRESET_INSTRUMENTS: PairSpec[] = [
-  // US Stocks (Vantage Share CFDs — 1 Lot = 1 Share, Point = $0.01)
   {
     id: 'AAPL',
     label: 'AAPL',
@@ -246,6 +256,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'NASDAQ:AAPL',
     feedSymbol: 'NASDAQ:AAPL',
+    yahooSymbol: 'AAPL',
     priceDecimals: 2,
     typicalSpreadPoints: 4,
     firstLot: 1,
@@ -272,6 +283,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'NASDAQ:NVDA',
     feedSymbol: 'NASDAQ:NVDA',
+    yahooSymbol: 'NVDA',
     priceDecimals: 2,
     typicalSpreadPoints: 4,
     firstLot: 1,
@@ -298,6 +310,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'NASDAQ:TSLA',
     feedSymbol: 'NASDAQ:TSLA',
+    yahooSymbol: 'TSLA',
     priceDecimals: 2,
     typicalSpreadPoints: 6,
     firstLot: 1,
@@ -324,6 +337,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'NASDAQ:MSFT',
     feedSymbol: 'NASDAQ:MSFT',
+    yahooSymbol: 'MSFT',
     priceDecimals: 2,
     typicalSpreadPoints: 5,
     firstLot: 1,
@@ -350,6 +364,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'NASDAQ:META',
     feedSymbol: 'NASDAQ:META',
+    yahooSymbol: 'META',
     priceDecimals: 2,
     typicalSpreadPoints: 6,
     firstLot: 1,
@@ -376,6 +391,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'NASDAQ:AMZN',
     feedSymbol: 'NASDAQ:AMZN',
+    yahooSymbol: 'AMZN',
     priceDecimals: 2,
     typicalSpreadPoints: 4,
     firstLot: 1,
@@ -394,7 +410,6 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     isCustom: true,
     unitLabel: 'Lot',
   },
-  // Metals, Indices, Forex & Crypto
   {
     id: 'XAUUSD',
     label: 'GOLD',
@@ -403,6 +418,9 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'metal',
     tvSymbol: 'VANTAGE:XAUUSD',
     feedSymbol: 'PEPPERSTONE:XAUUSD',
+    yahooSymbol: 'GC=F',
+    yahooProxySymbol: 'GLD',
+    krakenSymbol: 'PAXG/USD',
     priceDecimals: 2,
     typicalSpreadPoints: 18,
     firstLot: 0.01,
@@ -429,6 +447,8 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'index',
     tvSymbol: 'VANTAGE:NAS100',
     feedSymbol: 'CME_MINI:NQ1!',
+    yahooSymbol: '^NDX',
+    yahooProxySymbol: 'QQQ',
     priceDecimals: 1,
     typicalSpreadPoints: 150,
     firstLot: 0.1,
@@ -455,6 +475,8 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'index',
     tvSymbol: 'VANTAGE:SP500',
     feedSymbol: 'CME_MINI:ES1!',
+    yahooSymbol: '^GSPC',
+    yahooProxySymbol: 'SPY',
     priceDecimals: 1,
     typicalSpreadPoints: 60,
     firstLot: 0.1,
@@ -482,6 +504,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     tvSymbol: 'VANTAGE:EURUSD',
     feedSymbol: 'VANTAGE:EURUSD',
     vantageStdFeedSymbol: 'VANTAGE:EURUSD.TV',
+    yahooSymbol: 'EURUSD=X',
     isDirectVantageFeed: true,
     priceDecimals: 5,
     typicalSpreadPoints: 2,
@@ -509,6 +532,8 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'crypto',
     tvSymbol: 'VANTAGE:BTCUSD',
     feedSymbol: 'BINANCE:BTCUSDT',
+    yahooSymbol: 'BTC-USD',
+    krakenSymbol: 'BTC/USD',
     binanceSymbol: 'BTCUSDT',
     priceDecimals: 2,
     typicalSpreadPoints: 1500,
@@ -528,7 +553,6 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     isCustom: true,
     unitLabel: 'Lot',
   },
-  // Thai Stocks (SET)
   {
     id: 'SET_DELTA',
     label: 'DELTA',
@@ -537,6 +561,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'SET:DELTA',
     feedSymbol: 'SET:DELTA',
+    yahooSymbol: 'DELTA.BK',
     priceDecimals: 2,
     typicalSpreadPoints: 1,
     firstLot: 100,
@@ -563,6 +588,7 @@ export const PRESET_INSTRUMENTS: PairSpec[] = [
     category: 'stock',
     tvSymbol: 'SET:PTT',
     feedSymbol: 'SET:PTT',
+    yahooSymbol: 'PTT.BK',
     priceDecimals: 2,
     typicalSpreadPoints: 1,
     firstLot: 100,
@@ -590,46 +616,37 @@ export const STORAGE_KEYS = {
   RR_RATIO: 'lotfast_rr_ratio_v1',
   PIN: 'lotfast_user_pin_v2',
   UNLOCK_UNTIL: 'lotfast_unlock_until_v1',
-  RATES: 'lotfast_cached_rates_v2',
-  QUOTES: 'lotfast_cached_quotes_v2',
+  QUOTES: 'lotfast_cached_quotes_v3',
   HISTORY: 'lotfast_calc_history_v1',
   CUSTOM_PAIRS: 'lotfast_custom_pairs_v2',
   VANTAGE_ACCOUNT: 'lotfast_vantage_acct_v2',
   MT5_LAUNCH_MODE: 'lotfast_mt5_launch_v2',
+  METAAPI_CONFIG: 'lotfast_metaapi_direct_v1',
 } as const;
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.1.0',
+    date: '2026-11-25',
+    notes: [
+      'อัปเกรดเอนจินราคาเป็น WebSocket Real-time แท้ (Yahoo Live Stream + Kraken BBO + Binance WS) ที่ราคาวิ่งขึ้นลงจริงทุกวินาที พร้อมคาลิเบรตสเปรดและฐานราคาตรงจากฟีด Vantage RAW/STD',
+      'รองรับการเชื่อมต่อราคาตรง 1:1 จากเซิร์ฟเวอร์ Vantage MT5 (MetaApi Direct) ในหน้าตั้งค่าสำหรับผู้ที่ต้องการทศนิยมตรงพอร์ต 100%',
+      'ปรับโฉมแผง Bid / Offer ใหม่ทั้งหมดพร้อมกราฟเส้น Tick Sparkline สด, ลูกศรทิศทางราคา, ค่า Spread และแจ้งเตือนทันทีเมื่อราคาค้าง',
+      'ปรับสัดส่วน Layout ให้พอดี 1 หน้าจอ iPhone (100dvh Fit-to-Screen) ไม่ต้องเลื่อนขึ้นลงขณะออกออเดอร์',
+    ],
+  },
+  {
     version: 'v2.0.0',
     date: '2026-11-24',
     notes: [
-      'เชื่อมต่อราคา Bid / Offer (Ask) แบบ Real-time ตรงจากฟีด Vantage (รองรับทั้ง Raw ECN และ Standard STP) พร้อมตัวตรวจจับและแจ้งเตือนทันทีหากราคาค้างหรือไม่อัปเดต',
-      'เพิ่มปุ่มคีย์ลัด 1 แตะเปิดแอป MT5 (พร้อมปุ่มคัดลอก & เปิด MT5 ทันที) และ TradingView (เปิดตรงกราฟคู่เงิน/หุ้นที่เลือกอยู่)',
-      'รองรับการเพิ่มหุ้นและสินทรัพย์อื่นได้อย่างอิสระ (หุ้นสหรัฐ AAPL/NVDA/TSLA, หุ้นไทย SET, ทองคำ XAUUSD, ดัชนี NAS100/SP500, คริปโต BTC และกรอก Ticker เองได้)',
-      'ปรับโฉม UX/UI ใหม่ทั้งหมดด้วยพื้นผิว Obsidian Grid + Carbon Mesh สไตล์เทรดมืออาชีพ และแก้บั๊ก Dependencies / Vite 8 / GitHub Pages Base Path เรียบร้อย',
+      'เพิ่มแผงราคา Bid/Offer, ปุ่มคีย์ลัด 1 แตะ MT5 & TradingView, ระบบเพิ่มหุ้นอิสระ และปรับโฉม Obsidian Grid UI',
     ],
   },
   {
     version: 'v1.1.1',
     date: '2026-11-22',
     notes: [
-      'รองรับการพิมพ์อัตราส่วน R:R ในรูปแบบ 1:2, 1:3 หรือทศนิยมโดยตรง พร้อมแสดง Take Profit (USD) ทั้งจากขนาดไม้ที่ 2, รวม 2 ไม้ และเป้าจาก Risk Limit',
-    ],
-  },
-  {
-    version: 'v1.1.0',
-    date: '2026-11-22',
-    notes: [
-      'เพิ่มช่องตั้งค่า Target/SL Ratio (R:R) แบบเสริม พร้อมแสดงกำไรคาดการณ์ (Projected Take-Profit)',
-      'เปลี่ยนรหัส PIN เริ่มต้นเป็น 0808 เพื่อความปลอดภัยส่วนตัว',
-    ],
-  },
-  {
-    version: 'v1.0.0',
-    date: '2026-11-22',
-    notes: [
-      'รองรับ 4 คู่เงินหลักตามสเปก Vantage USD: USDJPY, GU, GJ (ไม้ 1 = 0.01) และ US30/DJ30 (ไม้ 1 = 0.1)',
-      'ระบบ PIN Lock 4 หลัก, ติดตั้ง PWA เต็มจอบน iPhone และบันทึกประวัติคำนวณล่าสุด',
+      'เพิ่มช่องตั้งค่า R:R Ratio (1:2, 1:3) คำนวณ Take Profit คาดการณ์ และเปลี่ยน PIN เริ่มต้นเป็น 0808',
     ],
   },
 ];
@@ -637,60 +654,51 @@ export const CHANGELOG: ChangelogEntry[] = [
 export const MT5_NO_VPS_OPTIONS: Mt5Option[] = [
   {
     id: 'metaapi',
-    title: '1. Cloud MT5 API (MetaApi Cloud + Cloudflare Worker)',
-    subtitle: 'ใกล้เคียง EA อัตโนมัติที่สุด โดยไม่ต้องเช่าหรือดูแล VPS เอง',
-    costLabel: '~$15–$30 / เดือน',
-    iphoneEase: 'ใช้งานบน iPhone 100% (เปิดไม้ 2 จากแอปนี้ได้เลย)',
+    title: '1. เชื่อมต่อตรง Vantage MT5 ผ่าน MetaApi Cloud (รองรับในหน้าตั้งค่าแล้ว!)',
+    subtitle: 'ดึงราคา Bid/Offer ตรงจากเซิร์ฟเวอร์ Vantage MT5 ของคุณ 1:1 โดยไม่ต้องใช้ VPS',
+    costLabel: 'มี Free Tier ทดลอง / ~$15–$30/ด.',
+    iphoneEase: 'กรอก Token + Account ID ในปุ่ม ⚙️ ของ LotFast ได้ทันที',
     needsVps: false,
     recommended: true,
     howItWorks:
-      'MetaApi รัน MT5 Terminal บน Cloud แทนเรา แล้วเชื่อมต่อกับ LotFast ผ่าน Cloudflare Worker (ฟรี) เพื่อดึงออเดอร์ไม้ 1 อัตโนมัติและส่งคำสั่งเปิดไม้ 2 ทันที',
+      'สมัคร MetaApi Cloud และผูกบัญชี Vantage MT5 (ใช้ Investor Password แบบดูอย่างเดียวก็ดึงราคาสดได้ ปลอดภัย 100%) แล้วนำ Token + Account ID มาใส่ในหน้าตั้งค่า ⚙️ ของ LotFast',
     pros: [
-      'ไม่ต้องเปิดคอมหรือเช่า Windows VPS',
-      'ตรวจจับเส้น SL ของไม้แรกอัตโนมัติ และกดยิงไม้ 2 ใน 1 แตะจาก LotFast',
-      'ทำงานได้ทุกที่บน iPhone ผ่าน 4G/5G',
+      'ราคา Bid/Offer ตรงกับแอป MT5 Vantage ของคุณทุกทศนิยม 100%',
+      'ไม่ต้องเช่า VPS ไม่ต้องเปิดคอมทิ้งไว้ และใช้บน iPhone ได้ตลอด 24 ชม.',
+      'ใช้ Investor Password (Read-only) ได้เพื่อความปลอดภัยสูงสุด',
     ],
     cons: [
-      'มีค่าบริการรายเดือนของ Cloud API',
-      'ต้องตั้งค่า Token บน Cloudflare Worker ครั้งแรกเพื่อความปลอดภัย',
+      'บัญชีขนาดใหญ่หรือใช้งานหนักอาจมีค่าบริการรายเดือนของ MetaApi',
     ],
   },
   {
     id: 'tradingview',
     title: '2. บัญชี Vantage + แอป TradingView บน iPhone',
-    subtitle: 'ทางลัดฟรี 100% ไม่ต้องใช้ VPS และตั้ง Risk เป็น USD ได้เลย',
+    subtitle: 'ทางลัดฟรี 100% เทรดบนกราฟพร้อมตั้ง Risk เป็น USD ในไม้เดียว',
     costLabel: 'ฟรี 100%',
-    iphoneEase: 'ง่ายมาก (สั่งซื้อบนแอป TradingView แทน MT5)',
+    iphoneEase: 'กดปุ่ม "กราฟ TradingView" จาก LotFast เปิดกราฟคู่เงินนั้นทันที',
     needsVps: false,
     howItWorks:
-      'เปิดบัญชี Vantage ประเภทที่รองรับ TradingView แล้วล็อกอินในแอป TradingView บน iPhone หน้า Order Panel สามารถกรอก Risk $30 เพื่อคำนวณ Lot ให้อัตโนมัติในไม้เดียว',
+      'เปิดบัญชี Vantage ประเภทที่รองรับ TradingView แล้วล็อกอินในแอป TradingView บน iPhone หน้า Order Panel สามารถกรอก Risk $30 เพื่อคำนวณ Lot ให้อัตโนมัติ',
     pros: [
-      'ไม่มีค่าใช้จ่ายรายเดือน ไม่ต้องใช้ VPS หรือโค้ดเสริม',
-      'ความปลอดภัยสูงสุด เชื่อมตรงกับโบรกเกอร์ Vantage',
+      'ฟรี 100% เชื่อมตรงกับโบรกเกอร์ Vantage',
       'ตั้ง Stop Loss และกำหนด Risk เป็น USD จบในหน้าจอเดียว',
     ],
     cons: [
       'ต้องย้ายไปกดออเดอร์ผ่านแอป TradingView แทนแอป MT5',
-      'ต้องตรวจสอบประเภทบัญชีกับ Vantage ว่ารองรับครบทุกสินทรัพย์ที่ต้องการ',
     ],
   },
   {
     id: 'python-bridge',
     title: '3. Local Python Bridge + Cloudflare Tunnel',
-    subtitle: 'ฟรีและยืดหยุ่นสูงสุด แต่ต้องเปิดคอม Windows ที่บ้านไว้',
+    subtitle: 'ฟรีและยืดหยุ่นสูงสุด สำหรับผู้ที่เปิดคอม Windows ที่บ้านอยู่แล้ว',
     costLabel: 'ฟรี (ค่าไฟคอมที่บ้าน)',
-    iphoneEase: 'ปานกลาง (ใช้ได้เฉพาะช่วงที่เปิดคอมทิ้งไว้)',
+    iphoneEase: 'ใช้ได้เฉพาะช่วงที่เปิดคอมทิ้งไว้',
     needsVps: false,
     howItWorks:
-      'รัน Python + ไลบรารี MetaTrader5 + FastAPI บน PC ที่บ้าน แล้วเชื่อมเข้า LotFast ผ่าน Cloudflare Tunnel (HTTPS ฟรี) พร้อม API Key ส่วนตัว',
-    pros: [
-      'ฟรี ไม่มีค่าเช่ารายเดือน และปรับแต่งเงื่อนไข EA/Risk ได้อิสระเต็มที่',
-      'รหัสผ่านพอร์ตอยู่แค่บนคอมส่วนตัวของเราเอง',
-    ],
-    cons: [
-      'หากปิดคอม คอมหลับ หรือเน็ตบ้านหลุด จะไม่สามารถส่งคำสั่งได้',
-      'ไม่เหมาะกับการเทรดนอกบ้านตลอด 24 ชม.',
-    ],
+      'รัน Python + ไลบรารี MetaTrader5 + FastAPI บน PC ที่บ้าน แล้วเชื่อมเข้า LotFast ผ่าน Cloudflare Tunnel (HTTPS ฟรี)',
+    pros: ['ฟรีและปรับแต่งเงื่อนไข EA/Risk ได้อิสระเต็มที่'],
+    cons: ['หากปิดคอมหรือเน็ตบ้านหลุดจะไม่สามารถเชื่อมต่อได้'],
   },
 ];
 
@@ -713,9 +721,6 @@ export interface CustomInstrumentInput {
   typicalSpreadPoints: number;
 }
 
-/**
- * สร้าง PairSpec มาตรฐานจากข้อมูลหุ้น/สินทรัพย์ที่ผู้ใช้กรอกเอง
- */
 export function buildCustomPairSpec(input: CustomInstrumentInput): PairSpec {
   const cleanRaw = input.symbol.trim().toUpperCase().replace(/\s+/g, '');
   const hasExchange = cleanRaw.includes(':');
@@ -742,6 +747,21 @@ export function buildCustomPairSpec(input: CustomInstrumentInput): PairSpec {
 
   const tvSymbol = `${defaultExchange}:${cleanTicker}`;
   const isVantageForex = input.category === 'forex' && defaultExchange === 'VANTAGE';
+
+  // Auto-resolve Yahoo Finance WebSocket ticker for real-time every-second ticks!
+  let yahooSymbol: string | undefined;
+  if (input.quoteType === 'STOCK_THB') {
+    yahooSymbol = cleanTicker.endsWith('.BK') ? cleanTicker : `${cleanTicker}.BK`;
+  } else if (input.category === 'stock') {
+    yahooSymbol = cleanTicker;
+  } else if (input.category === 'forex') {
+    yahooSymbol = cleanTicker.startsWith('USD') && cleanTicker.length === 6
+      ? `${cleanTicker.slice(3)}=X`
+      : `${cleanTicker}=X`;
+  } else if (input.category === 'crypto') {
+    const base = cleanTicker.replace(/USDT?$/, '');
+    yahooSymbol = `${base}-USD`;
+  }
 
   const lotStep = Number.isFinite(input.lotStep) && input.lotStep > 0 ? input.lotStep : 0.01;
   const lotDecimals =
@@ -772,6 +792,7 @@ export function buildCustomPairSpec(input: CustomInstrumentInput): PairSpec {
     tvSymbol,
     feedSymbol: tvSymbol,
     vantageStdFeedSymbol: isVantageForex ? `${tvSymbol}.TV` : undefined,
+    yahooSymbol,
     binanceSymbol:
       input.category === 'crypto'
         ? cleanTicker.endsWith('USDT')

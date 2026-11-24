@@ -2,17 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   APP_CONFIG,
   STORAGE_KEYS,
+  type MetaApiDirectConfig,
   type PairSpec,
   type VantageAccountType,
 } from '../config/tradingConfig';
 import type { LiveRates } from '../utils/calculator';
 import {
+  buildStreamingTickQuote,
   evaluateFeedHealth,
   normalizeScannerQuote,
   resolveFeedTicker,
   type MarketQuote,
   type RawScannerRow,
+  type VantageSpreadAnchor,
 } from '../utils/quoteParser';
+import { decodeYahooPricingData } from '../utils/yahooProto';
 
 interface StoredQuotesPayload {
   quotes: Record<string, MarketQuote>;
@@ -26,7 +30,18 @@ function readCachedQuotes(): StoredQuotesPayload | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredQuotesPayload;
     if (parsed?.quotes && parsed?.rates && Number.isFinite(parsed.rates.USDJPY)) {
-      return parsed;
+      // Mark restored quotes as cached with preserved sparklines
+      const restored: Record<string, MarketQuote> = {};
+      for (const [k, q] of Object.entries(parsed.quotes)) {
+        if (q && Number.isFinite(q.bid) && Number.isFinite(q.ask)) {
+          restored[k] = {
+            ...q,
+            sparkline: Array.isArray(q.sparkline) ? q.sparkline.slice(-24) : [q.mid],
+            tickSeq: typeof q.tickSeq === 'number' ? q.tickSeq : 0,
+          };
+        }
+      }
+      return { ...parsed, quotes: restored };
     }
   } catch {
     // ignore storage errors
@@ -34,9 +49,6 @@ function readCachedQuotes(): StoredQuotesPayload | null {
   return null;
 }
 
-/**
- * ทดสอบดึงราคาจริงของหุ้น/สินทรัพย์เดี่ยว (ใช้ในหน้าเพิ่มหุ้น เพื่อให้เห็นราคาจริงก่อนบันทึก)
- */
 export async function probeSingleTickerQuote(
   rawTicker: string
 ): Promise<{
@@ -131,9 +143,10 @@ export function useMarketQuotes(params: {
   pairs: PairSpec[];
   activePairId: string;
   accountType: VantageAccountType;
+  metaApiConfig: MetaApiDirectConfig;
   isOnline: boolean;
 }) {
-  const { pairs, activePairId, accountType, isOnline } = params;
+  const { pairs, activePairId, accountType, metaApiConfig, isOnline } = params;
   const cached = readCachedQuotes();
 
   const [quotes, setQuotes] = useState<Record<string, MarketQuote>>(
@@ -145,34 +158,107 @@ export function useMarketQuotes(params: {
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(
     cached?.updatedAt ?? null
   );
+  const [wsConnected, setWsConnected] = useState(false);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
-  const quotesRef = useRef(quotes);
+  const quotesRef = useRef<Record<string, MarketQuote>>(quotes);
   quotesRef.current = quotes;
 
-  const ratesRef = useRef(rates);
+  const ratesRef = useRef<LiveRates>(rates);
   ratesRef.current = rates;
 
-  const pairsRef = useRef(pairs);
+  const pairsRef = useRef<PairSpec[]>(pairs);
   pairsRef.current = pairs;
+
+  const activePairIdRef = useRef(activePairId);
+  activePairIdRef.current = activePairId;
 
   const accountTypeRef = useRef(accountType);
   accountTypeRef.current = accountType;
 
-  const inFlightRef = useRef(false);
+  const metaApiRef = useRef(metaApiConfig);
+  metaApiRef.current = metaApiConfig;
 
-  const refreshQuotes = useCallback(async () => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+  const vantageAnchorsRef = useRef<Record<string, VantageSpreadAnchor>>({});
+  const proxyScaleRef = useRef<Record<string, { ratio: number; lastProxy: number }>>({});
+  const lastWsTickAtRef = useRef<Record<string, number>>({});
+  const pendingUpdatesRef = useRef<Record<string, MarketQuote>>({});
+  const pendingRatesRef = useRef<Partial<LiveRates>>({});
+  const inFlightAnchorRef = useRef(false);
+
+  // Coalesce high-frequency WebSocket ticks every 200ms so UI feels silky-smooth on iPhone
+  useEffect(() => {
+    const flushTimer = window.setInterval(() => {
+      const pendingQ = pendingUpdatesRef.current;
+      const keys = Object.keys(pendingQ);
+      if (keys.length === 0) return;
+
+      pendingUpdatesRef.current = {};
+      const nextQuotes = { ...quotesRef.current, ...pendingQ };
+      quotesRef.current = nextQuotes;
+      setQuotes(nextQuotes);
+
+      const pRates = pendingRatesRef.current;
+      if (Object.keys(pRates).length > 0) {
+        pendingRatesRef.current = {};
+        const nextRates = { ...ratesRef.current, ...pRates };
+        ratesRef.current = nextRates;
+        setRates(nextRates);
+      }
+
+      const now = Date.now();
+      setLastSuccessAt(now);
+      setConsecutiveErrors(0);
+    }, 200);
+
+    return () => window.clearInterval(flushTimer);
+  }, []);
+
+  // Persist snapshot occasionally (every 10s) so reload starts warm without thrashing localStorage
+  useEffect(() => {
+    const saveTimer = window.setInterval(() => {
+      if (Object.keys(quotesRef.current).length === 0) return;
+      try {
+        localStorage.setItem(
+          STORAGE_KEYS.QUOTES,
+          JSON.stringify({
+            quotes: quotesRef.current,
+            rates: ratesRef.current,
+            updatedAt: Date.now(),
+          })
+        );
+      } catch {
+        // ignore storage quota
+      }
+    }, 10_000);
+    return () => window.clearInterval(saveTimer);
+  }, []);
+
+  const queueTick = useCallback((quote: MarketQuote) => {
+    pendingUpdatesRef.current[quote.pairId] = quote;
+    quotesRef.current[quote.pairId] = quote;
+    lastWsTickAtRef.current[quote.pairId] = quote.fetchedAt;
+
+    if (quote.pairId === 'USDJPY') pendingRatesRef.current.USDJPY = quote.mid;
+    else if (quote.pairId === 'GBPUSD') pendingRatesRef.current.GBPUSD = quote.mid;
+    else if (quote.pairId === 'GBPJPY') pendingRatesRef.current.GBPJPY = quote.mid;
+  }, []);
+
+  // =========================================================================
+  // LAYER 1: Vantage Live Spread Anchor + Initial Snapshot (TradingView Scanner)
+  // =========================================================================
+  const refreshVantageAnchor = useCallback(async () => {
+    if (inFlightAnchorRef.current) return;
+    inFlightAnchorRef.current = true;
     setIsRefreshing(true);
 
     const currentPairs = pairsRef.current;
     const currentAcct = accountTypeRef.current;
     const now = Date.now();
 
-    // Always include Vantage USDJPY, GBPUSD, GBPJPY, USDTHB so cross/pip conversion stays accurate
     const tickerToPairs = new Map<string, PairSpec[]>();
     const tickerSet = new Set<string>([
       currentAcct === 'STD' ? 'VANTAGE:USDJPY.TV' : 'VANTAGE:USDJPY',
@@ -181,31 +267,18 @@ export function useMarketQuotes(params: {
       'VANTAGE:USDTHB',
     ]);
 
-    const cryptoPairs: PairSpec[] = [];
     for (const pair of currentPairs) {
       const feedTicker = resolveFeedTicker(pair, currentAcct);
       tickerSet.add(feedTicker);
-      const existing = tickerToPairs.get(feedTicker) ?? [];
-      existing.push(pair);
-      tickerToPairs.set(feedTicker, existing);
-      if (pair.binanceSymbol) {
-        cryptoPairs.push(pair);
-      }
+      const list = tickerToPairs.get(feedTicker) ?? [];
+      list.push(pair);
+      tickerToPairs.set(feedTicker, list);
     }
 
-    let gotFreshData = false;
-    const nextQuotes: Record<string, MarketQuote> = { ...quotesRef.current };
-    const currentRates = ratesRef.current;
-    const nextRates: LiveRates = {
-      USDJPY: currentRates.USDJPY || APP_CONFIG.FALLBACK_RATES.USDJPY,
-      GBPUSD: currentRates.GBPUSD || APP_CONFIG.FALLBACK_RATES.GBPUSD,
-      GBPJPY: currentRates.GBPJPY || APP_CONFIG.FALLBACK_RATES.GBPJPY,
-      USDTHB: currentRates.USDTHB || APP_CONFIG.FALLBACK_RATES.USDTHB,
-    };
+    let gotAny = false;
 
     try {
-      // 1. Primary Batch Fetch: TradingView Scanner (Direct Vantage RAW/STD Bid/Ask + CFD + Stocks)
-      const scannerPromise = fetch('https://scanner.tradingview.com/global/scan', {
+      const res = await fetch('https://scanner.tradingview.com/global/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
@@ -223,36 +296,8 @@ export function useMarketQuotes(params: {
         signal: AbortSignal.timeout(7000),
       });
 
-      // 2. Optional Parallel Crypto BookTicker Fetch (Binance real-time ms Bid/Ask, CORS *)
-      const binancePromises = cryptoPairs.map(async (cp) => {
-        if (!cp.binanceSymbol) return null;
-        try {
-          const r = await fetch(
-            `https://api.binance.com/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(
-              cp.binanceSymbol
-            )}`,
-            { cache: 'no-store', signal: AbortSignal.timeout(4500) }
-          );
-          if (!r.ok) return null;
-          const b = (await r.json()) as { bidPrice?: string; askPrice?: string };
-          const bid = Number.parseFloat(b.bidPrice ?? '');
-          const ask = Number.parseFloat(b.askPrice ?? '');
-          if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask >= bid) {
-            return { pair: cp, bid, ask };
-          }
-        } catch {
-          // ignore and let scanner fallback cover it
-        }
-        return null;
-      });
-
-      const [scannerRes, ...binanceResults] = await Promise.all([
-        scannerPromise,
-        ...binancePromises,
-      ]);
-
-      if (scannerRes.ok) {
-        const json = (await scannerRes.json()) as {
+      if (res.ok) {
+        const json = (await res.json()) as {
           data?: Array<{ s: string; d: Array<string | number | null> }>;
         };
 
@@ -273,143 +318,554 @@ export function useMarketQuotes(params: {
               : raw.close ?? null;
 
           if (midVal && midVal > 0) {
-            if (ticker.startsWith('VANTAGE:USDJPY')) nextRates.USDJPY = midVal;
-            if (ticker.startsWith('VANTAGE:GBPUSD')) nextRates.GBPUSD = midVal;
-            if (ticker.startsWith('VANTAGE:GBPJPY')) nextRates.GBPJPY = midVal;
-            if (ticker.startsWith('VANTAGE:USDTHB')) nextRates.USDTHB = midVal;
+            if (ticker.startsWith('VANTAGE:USDJPY')) pendingRatesRef.current.USDJPY = midVal;
+            if (ticker.startsWith('VANTAGE:GBPUSD')) pendingRatesRef.current.GBPUSD = midVal;
+            if (ticker.startsWith('VANTAGE:GBPJPY')) pendingRatesRef.current.GBPJPY = midVal;
+            if (ticker.startsWith('VANTAGE:USDTHB')) pendingRatesRef.current.USDTHB = midVal;
           }
 
           const matchedPairs = tickerToPairs.get(ticker) ?? [];
           for (const pair of matchedPairs) {
+            // Save Vantage's exact live spread anchor whenever Bid & Ask are healthy
+            if (
+              raw.bid &&
+              raw.ask &&
+              raw.ask >= raw.bid &&
+              (!raw.close || Math.abs((raw.bid + raw.ask) / 2 - raw.close) / raw.close <= 0.002)
+            ) {
+              vantageAnchorsRef.current[pair.id] = {
+                spreadAbs: Math.max(pair.pointSize, raw.ask - raw.bid),
+                vantageMid: (raw.bid + raw.ask) / 2,
+                updatedAt: now,
+              };
+            }
+
+            // Re-calibrate ETF proxy ratio (e.g. DIA -> US30) whenever real index price arrives
+            if (pair.yahooProxySymbol && raw.close && raw.close > 0) {
+              const prevProxy = proxyScaleRef.current[pair.id]?.lastProxy;
+              if (prevProxy && prevProxy > 0) {
+                proxyScaleRef.current[pair.id] = {
+                  ratio: raw.close / prevProxy,
+                  lastProxy: prevProxy,
+                };
+              }
+            }
+
+            // Do NOT overwrite a live WebSocket tick received within the last 4 seconds!
+            const lastWs = lastWsTickAtRef.current[pair.id] ?? 0;
+            if (now - lastWs < 4000) {
+              gotAny = true;
+              continue;
+            }
+
             const normalized = normalizeScannerQuote({
               pair,
               raw,
               accountType: currentAcct,
               now,
-              prevMid: quotesRef.current[pair.id]?.mid,
+              prevQuote: quotesRef.current[pair.id],
             });
             if (normalized) {
-              nextQuotes[pair.id] = normalized;
-              gotFreshData = true;
+              pendingUpdatesRef.current[pair.id] = normalized;
+              quotesRef.current[pair.id] = normalized;
+              gotAny = true;
             }
           }
-        }
-      }
-
-      // Overlay Binance live BookTicker Bid/Ask for Crypto pairs
-      for (const bItem of binanceResults) {
-        if (!bItem) continue;
-        const existing = nextQuotes[bItem.pair.id];
-        const normalized = normalizeScannerQuote({
-          pair: bItem.pair,
-          raw: {
-            bid: bItem.bid,
-            ask: bItem.ask,
-            close: (bItem.bid + bItem.ask) / 2,
-            change: existing?.changePct ?? null,
-            change_abs: existing?.changeAbs ?? null,
-            update_mode: 'streaming',
-          },
-          accountType: currentAcct,
-          now,
-          prevMid: quotesRef.current[bItem.pair.id]?.mid,
-          overrideDirectSourceLabel: 'Binance Live B/A',
-        });
-        if (normalized) {
-          nextQuotes[bItem.pair.id] = normalized;
-          gotFreshData = true;
         }
       }
     } catch {
-      // Fallback below
+      // handled below
     }
 
-    // 3. Emergency FX Fallback if primary stream failed
-    if (!gotFreshData) {
-      try {
-        const res = await fetch('https://open.er-api.com/v6/latest/USD', {
-          cache: 'no-store',
-          signal: AbortSignal.timeout(5000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const jpy = Number(data?.rates?.JPY);
-          const gbpPerUsd = Number(data?.rates?.GBP);
-          const thb = Number(data?.rates?.THB);
-          if (Number.isFinite(jpy) && jpy > 50 && Number.isFinite(gbpPerUsd) && gbpPerUsd > 0) {
-            nextRates.USDJPY = Number(jpy.toFixed(3));
-            nextRates.GBPUSD = Number((1 / gbpPerUsd).toFixed(5));
-            nextRates.GBPJPY = Number(((1 / gbpPerUsd) * jpy).toFixed(3));
-            if (Number.isFinite(thb) && thb > 15) {
-              nextRates.USDTHB = Number(thb.toFixed(3));
-            }
-          }
-        }
-      } catch {
-        // remain on cached rates
-      }
-    }
-
-    if (gotFreshData) {
-      setQuotes(nextQuotes);
-      setRates(nextRates);
+    if (!gotAny) {
+      setConsecutiveErrors((c) => c + 1);
+    } else {
       setLastSuccessAt(now);
       setConsecutiveErrors(0);
-      try {
-        localStorage.setItem(
-          STORAGE_KEYS.QUOTES,
-          JSON.stringify({
-            quotes: nextQuotes,
-            rates: nextRates,
-            updatedAt: now,
-          })
-        );
-      } catch {
-        // ignore quota errors
-      }
-    } else {
-      setRates(nextRates);
-      setConsecutiveErrors((c) => c + 1);
     }
 
-    inFlightRef.current = false;
+    inFlightAnchorRef.current = false;
     setIsRefreshing(false);
   }, []);
 
-  // Trigger immediate refresh on mount, when pairs list or Vantage account type changes
+  // =========================================================================
+  // LAYER 2: Sub-Second Real-Time WebSockets (Yahoo Live + Kraken BBO + Binance)
+  // =========================================================================
   useEffect(() => {
-    refreshQuotes();
-  }, [pairs.length, accountType, isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isOnline) {
+      setWsConnected(false);
+      return;
+    }
 
-  // High-frequency live polling (pauses automatically when app is backgrounded on iPhone)
-  useEffect(() => {
-    const poll = () => {
-      if (document.visibilityState === 'visible') {
-        refreshQuotes();
+    // If user enabled Direct Vantage MT5 (MetaApi), let Layer 3 drive the active symbol
+    let disposed = false;
+    let yahooWs: WebSocket | null = null;
+    let krakenWs: WebSocket | null = null;
+    let binanceWs: WebSocket | null = null;
+    let retryTimer: number | null = null;
+    let retryDelay = 1200;
+
+    let yahooUp = false;
+    let krakenUp = false;
+    let binanceUp = false;
+
+    const syncConnectedFlag = () => {
+      if (!disposed) {
+        setWsConnected(yahooUp || krakenUp || binanceUp);
       }
     };
-    const intervalId = window.setInterval(poll, APP_CONFIG.QUOTE_POLL_INTERVAL_MS);
+
+    const connectYahoo = () => {
+      if (disposed || typeof WebSocket === 'undefined') return;
+      try {
+        const ws = new WebSocket('wss://streamer.finance.yahoo.com/');
+        yahooWs = ws;
+
+        ws.onopen = () => {
+          if (disposed) {
+            ws.close();
+            return;
+          }
+          yahooUp = true;
+          retryDelay = 1200;
+          syncConnectedFlag();
+
+          const subs = new Set<string>(['JPY=X', 'GBPUSD=X', 'GBPJPY=X', 'THB=X']);
+          for (const p of pairsRef.current) {
+            if (p.yahooSymbol) subs.add(p.yahooSymbol);
+            if (p.yahooProxySymbol) subs.add(p.yahooProxySymbol);
+          }
+          ws.send(JSON.stringify({ subscribe: Array.from(subs) }));
+        };
+
+        ws.onmessage = (ev) => {
+          if (disposed) return;
+          const tick = decodeYahooPricingData(String(ev.data));
+          if (!tick) return;
+
+          const now = Date.now();
+          const currentAcct = accountTypeRef.current;
+
+          if (tick.id === 'THB=X') {
+            pendingRatesRef.current.USDTHB = tick.price;
+          }
+
+          for (const pair of pairsRef.current) {
+            // Skip direct WebSocket override when MetaApi Direct is active for this symbol
+            if (
+              metaApiRef.current.enabled &&
+              metaApiRef.current.token &&
+              metaApiRef.current.accountId
+            ) {
+              continue;
+            }
+
+            // 1. Direct Yahoo symbol match (USDJPY, GBPUSD, GBPJPY, AAPL, NVDA, TSLA, PLTR, etc.)
+            if (pair.yahooSymbol && tick.id === pair.yahooSymbol) {
+              // If Kraken BBO is actively streaming tighter millisecond BBO for this pair (<2s ago), prefer Kraken
+              const prev = quotesRef.current[pair.id];
+              if (
+                pair.krakenSymbol &&
+                prev?.provenance === 'live_ws_bbo' &&
+                now - prev.fetchedAt < 2500
+              ) {
+                continue;
+              }
+
+              // Update exact index ratio when real index ticks (e.g. ^DJI, ^NDX, ^GSPC)
+              if (pair.yahooProxySymbol && proxyScaleRef.current[pair.id]?.lastProxy) {
+                proxyScaleRef.current[pair.id].ratio =
+                  tick.price / proxyScaleRef.current[pair.id].lastProxy;
+              }
+
+              const anchor = vantageAnchorsRef.current[pair.id];
+              const isVantageCal = Boolean(pair.isDirectVantageFeed || anchor);
+              const q = buildStreamingTickQuote({
+                pair,
+                mid: tick.price,
+                directBid: tick.bid ?? undefined,
+                directAsk: tick.ask ?? undefined,
+                changePct: tick.changePercent,
+                changeAbs: tick.change,
+                vantageAnchor: anchor,
+                accountType: currentAcct,
+                now,
+                prevQuote: prev,
+                provenance: isVantageCal ? 'vantage_ws_calibrated' : 'live_ws_bbo',
+                sourceLabel: pair.isDirectVantageFeed
+                  ? currentAcct === 'STD'
+                    ? 'Vantage STD · Live WS'
+                    : 'Vantage RAW · Live WS'
+                  : pair.category === 'stock'
+                    ? 'Live Stock WS'
+                    : 'Live WS · Vantage Spread',
+              });
+              if (q) queueTick(q);
+            }
+            // 2. High-frequency ETF proxy match (e.g. DIA -> US30, QQQ -> NAS100, SPY -> SP500)
+            else if (pair.yahooProxySymbol && tick.id === pair.yahooProxySymbol) {
+              const prev = quotesRef.current[pair.id];
+              const existingScale = proxyScaleRef.current[pair.id];
+              let ratio = existingScale?.ratio;
+
+              if (!ratio && prev && prev.mid > 0) {
+                ratio = prev.mid / tick.price;
+              } else if (!ratio) {
+                // Default known ETF -> Index multiplier fallback (DIA*100 ≈ US30, SPY*10 ≈ SP500, QQQ*41 ≈ NAS100)
+                ratio = pair.id === 'US30' ? 100 : pair.id === 'SP500' ? 10 : pair.id === 'NAS100' ? 41 : 10.9;
+              }
+
+              proxyScaleRef.current[pair.id] = { ratio, lastProxy: tick.price };
+              const scaledMid = tick.price * ratio;
+              const anchor = vantageAnchorsRef.current[pair.id];
+
+              const q = buildStreamingTickQuote({
+                pair,
+                mid: scaledMid,
+                changePct: tick.changePercent ?? prev?.changePct ?? null,
+                vantageAnchor: anchor,
+                accountType: currentAcct,
+                now,
+                prevQuote: prev,
+                provenance: 'vantage_ws_calibrated',
+                sourceLabel: 'Live WS · Vantage DJ30 Spread',
+              });
+              if (q) queueTick(q);
+            }
+          }
+        };
+
+        ws.onerror = () => {
+          yahooUp = false;
+          syncConnectedFlag();
+        };
+
+        ws.onclose = () => {
+          yahooUp = false;
+          syncConnectedFlag();
+          if (!disposed && document.visibilityState === 'visible') {
+            retryTimer = window.setTimeout(() => {
+              retryDelay = Math.min(8000, retryDelay * 1.6);
+              connectYahoo();
+            }, retryDelay);
+          }
+        };
+      } catch {
+        yahooUp = false;
+        syncConnectedFlag();
+      }
+    };
+
+    const connectKraken = () => {
+      if (disposed || typeof WebSocket === 'undefined') return;
+      const krakenSymbols = pairsRef.current
+        .map((p) => p.krakenSymbol)
+        .filter((s): s is string => Boolean(s));
+      if (krakenSymbols.length === 0) return;
+
+      try {
+        const ws = new WebSocket('wss://ws.kraken.com/v2');
+        krakenWs = ws;
+
+        ws.onopen = () => {
+          if (disposed) {
+            ws.close();
+            return;
+          }
+          krakenUp = true;
+          syncConnectedFlag();
+          ws.send(
+            JSON.stringify({
+              method: 'subscribe',
+              params: {
+                channel: 'ticker',
+                event_trigger: 'bbo',
+                symbol: Array.from(new Set(krakenSymbols)),
+              },
+            })
+          );
+        };
+
+        ws.onmessage = (ev) => {
+          if (disposed) return;
+          if (
+            metaApiRef.current.enabled &&
+            metaApiRef.current.token &&
+            metaApiRef.current.accountId
+          ) {
+            return;
+          }
+          try {
+            const msg = JSON.parse(String(ev.data)) as {
+              channel?: string;
+              data?: Array<{
+                symbol?: string;
+                bid?: number;
+                ask?: number;
+                change_pct?: number;
+                change?: number;
+              }>;
+            };
+            if (msg.channel !== 'ticker' || !Array.isArray(msg.data)) return;
+            const now = Date.now();
+            const currentAcct = accountTypeRef.current;
+
+            for (const item of msg.data) {
+              if (!item.symbol || !item.bid || !item.ask || item.ask < item.bid) continue;
+              const matched = pairsRef.current.filter(
+                (p) => p.krakenSymbol === item.symbol
+              );
+              for (const pair of matched) {
+                const anchor = vantageAnchorsRef.current[pair.id];
+                const mid = (item.bid + item.ask) / 2;
+                // If Vantage spread anchor exists for Forex, apply exact Vantage RAW/STD spread around live BBO mid
+                const useAnchorSpread = pair.isDirectVantageFeed && anchor && anchor.spreadAbs > 0;
+                const q = buildStreamingTickQuote({
+                  pair,
+                  mid: useAnchorSpread ? mid : undefined,
+                  directBid: useAnchorSpread ? undefined : item.bid,
+                  directAsk: useAnchorSpread ? undefined : item.ask,
+                  changePct:
+                    typeof item.change_pct === 'number' ? item.change_pct : null,
+                  changeAbs: typeof item.change === 'number' ? item.change : null,
+                  vantageAnchor: useAnchorSpread ? anchor : null,
+                  accountType: currentAcct,
+                  now,
+                  prevQuote: quotesRef.current[pair.id],
+                  provenance: useAnchorSpread ? 'vantage_ws_calibrated' : 'live_ws_bbo',
+                  sourceLabel: pair.isDirectVantageFeed
+                    ? currentAcct === 'STD'
+                      ? 'Vantage STD · Live BBO'
+                      : 'Vantage RAW · Live BBO'
+                    : 'Live BBO WS',
+                });
+                if (q) queueTick(q);
+              }
+            }
+          } catch {
+            // ignore malformed frame
+          }
+        };
+
+        ws.onerror = () => {
+          krakenUp = false;
+          syncConnectedFlag();
+        };
+
+        ws.onclose = () => {
+          krakenUp = false;
+          syncConnectedFlag();
+        };
+      } catch {
+        krakenUp = false;
+        syncConnectedFlag();
+      }
+    };
+
+    const connectBinance = () => {
+      if (disposed || typeof WebSocket === 'undefined') return;
+      const cryptoPairs = pairsRef.current.filter((p) => Boolean(p.binanceSymbol));
+      if (cryptoPairs.length === 0) return;
+      const streams = cryptoPairs
+        .map((p) => `${p.binanceSymbol!.toLowerCase()}@bookTicker`)
+        .join('/');
+
+      try {
+        const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
+        binanceWs = ws;
+
+        ws.onopen = () => {
+          if (disposed) {
+            ws.close();
+            return;
+          }
+          binanceUp = true;
+          syncConnectedFlag();
+        };
+
+        ws.onmessage = (ev) => {
+          if (disposed) return;
+          try {
+            const payload = JSON.parse(String(ev.data)) as {
+              data?: { s?: string; b?: string; a?: string };
+            };
+            const d = payload.data;
+            if (!d?.s || !d.b || !d.a) return;
+            const bid = Number.parseFloat(d.b);
+            const ask = Number.parseFloat(d.a);
+            if (!Number.isFinite(bid) || !Number.isFinite(ask) || ask < bid) return;
+
+            const now = Date.now();
+            for (const pair of pairsRef.current) {
+              if (pair.binanceSymbol?.toUpperCase() === d.s.toUpperCase()) {
+                const q = buildStreamingTickQuote({
+                  pair,
+                  directBid: bid,
+                  directAsk: ask,
+                  accountType: accountTypeRef.current,
+                  now,
+                  prevQuote: quotesRef.current[pair.id],
+                  provenance: 'live_ws_bbo',
+                  sourceLabel: 'Binance Live BBO',
+                });
+                if (q) queueTick(q);
+              }
+            }
+          } catch {
+            // ignore
+          }
+        };
+
+        ws.onerror = () => {
+          binanceUp = false;
+          syncConnectedFlag();
+        };
+
+        ws.onclose = () => {
+          binanceUp = false;
+          syncConnectedFlag();
+        };
+      } catch {
+        binanceUp = false;
+        syncConnectedFlag();
+      }
+    };
+
+    connectYahoo();
+    connectKraken();
+    connectBinance();
+
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshQuotes();
+      if (document.visibilityState === 'visible' && !disposed) {
+        refreshVantageAnchor();
+        if (!yahooWs || yahooWs.readyState > WebSocket.OPEN) connectYahoo();
+        if (!krakenWs || krakenWs.readyState > WebSocket.OPEN) connectKraken();
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, [refreshQuotes]);
 
-  // 1-second watchdog clock so stale-price alerts trigger automatically in real time
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      try {
+        yahooWs?.close();
+      } catch {
+        // ignore
+      }
+      try {
+        krakenWs?.close();
+      } catch {
+        // ignore
+      }
+      try {
+        binanceWs?.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [pairs.length, isOnline, reconnectNonce, queueTick, refreshVantageAnchor]);
+
+  // =========================================================================
+  // LAYER 3: Optional Direct 1:1 Vantage MT5 Server Feed (MetaApi Cloud)
+  // =========================================================================
+  useEffect(() => {
+    if (
+      !isOnline ||
+      !metaApiConfig.enabled ||
+      !metaApiConfig.token.trim() ||
+      !metaApiConfig.accountId.trim()
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollMetaApi = async () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      const active =
+        pairsRef.current.find((p) => p.id === activePairIdRef.current) ??
+        pairsRef.current[0];
+      if (!active) return;
+
+      const region = metaApiConfig.region || 'new-york';
+      const url = `https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${encodeURIComponent(
+        metaApiConfig.accountId.trim()
+      )}/symbols/${encodeURIComponent(active.mt5Symbol)}/current-price`;
+
+      try {
+        const res = await fetch(url, {
+          headers: { 'auth-token': metaApiConfig.token.trim() },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!res.ok) throw new Error(`MetaApi HTTP ${res.status}`);
+        const d = (await res.json()) as { bid?: number; ask?: number };
+        if (
+          typeof d.bid === 'number' &&
+          typeof d.ask === 'number' &&
+          d.bid > 0 &&
+          d.ask >= d.bid
+        ) {
+          const q = buildStreamingTickQuote({
+            pair: active,
+            directBid: d.bid,
+            directAsk: d.ask,
+            accountType: accountTypeRef.current,
+            now: Date.now(),
+            prevQuote: quotesRef.current[active.id],
+            provenance: 'vantage_mt5_direct',
+            sourceLabel: 'Vantage MT5 Direct',
+          });
+          if (q) queueTick(q);
+        }
+      } catch {
+        setConsecutiveErrors((c) => c + 1);
+      }
+    };
+
+    pollMetaApi();
+    const id = window.setInterval(pollMetaApi, APP_CONFIG.METAAPI_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [
+    isOnline,
+    metaApiConfig.enabled,
+    metaApiConfig.token,
+    metaApiConfig.accountId,
+    metaApiConfig.region,
+    activePairId,
+    queueTick,
+  ]);
+
+  // Initial & periodic Vantage Spread Anchor calibration
+  useEffect(() => {
+    refreshVantageAnchor();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshVantageAnchor();
+      }
+    }, APP_CONFIG.VANTAGE_ANCHOR_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [pairs.length, accountType, isOnline, refreshVantageAnchor]);
+
+  // 1-second watchdog clock for instant stale-price alerting
   useEffect(() => {
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
+  const manualReconnect = useCallback(() => {
+    setReconnectNonce((n) => n + 1);
+    refreshVantageAnchor();
+  }, [refreshVantageAnchor]);
+
   const activeQuote = quotes[activePairId] ?? null;
   const feedHealth = evaluateFeedHealth({
     isOnline,
+    wsConnected,
     lastSuccessAt,
     consecutiveErrors,
     now: nowTick,
@@ -420,9 +876,10 @@ export function useMarketQuotes(params: {
     quotes,
     activeQuote,
     rates,
+    wsConnected,
     lastSuccessAt,
     feedHealth,
     isRefreshing,
-    refreshQuotes,
+    refreshQuotes: manualReconnect,
   };
 }

@@ -6,7 +6,6 @@ import {
   Copy,
   Delete,
   ExternalLink,
-  Pencil,
   Plus,
   X,
 } from 'lucide-react';
@@ -34,6 +33,7 @@ interface CalculatorTerminalProps {
   onOpenSymbolManager: () => void;
   activeQuote: MarketQuote | null;
   accountType: VantageAccountType;
+  wsConnected: boolean;
   feedHealth: {
     state: FeedHealthState;
     ageSeconds: number | null;
@@ -42,7 +42,6 @@ interface CalculatorTerminalProps {
   isRefreshingQuotes: boolean;
   onRefreshQuotes: () => void;
   riskUsd: number;
-  onOpenRiskModal: () => void;
   mode: InputMode;
   onChangeMode: (mode: InputMode) => void;
   inputStr: string;
@@ -71,11 +70,11 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
   onOpenSymbolManager,
   activeQuote,
   accountType,
+  wsConnected,
   feedHealth,
   isRefreshingQuotes,
   onRefreshQuotes,
   riskUsd,
-  onOpenRiskModal,
   mode,
   onChangeMode,
   inputStr,
@@ -114,13 +113,17 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
       ? Math.min(100 - pct1, (result.loss2 / riskUsd) * 100)
       : 0;
 
+  const trimmedRr = rrRatio.trim();
+  const parsedRatio = trimmedRr ? parseRrRatio(trimmedRr) : null;
+  const isRrInvalid = trimmedRr !== '' && parsedRatio === null;
+
   return (
-    <div className="flex flex-col gap-3">
-      {/* 1. Dynamic Instrument Switcher + Free Add Stock Button */}
-      <div className="flex items-stretch gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {/* 1. Compact Instrument Switcher Rail + Add Stock Button (46px) */}
+      <div className="flex shrink-0 items-stretch gap-1.5">
         <div className="relative min-w-0 flex-1">
           <div
-            className={`no-scrollbar flex gap-1.5 overflow-x-auto pb-0.5 ${
+            className={`no-scrollbar flex gap-1.5 overflow-x-auto ${
               pairs.length <= 4 ? 'grid grid-cols-4' : 'pr-4'
             }`}
             role="group"
@@ -130,31 +133,31 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
               const active = p.id === pairId;
               const activeStyle =
                 p.isIndex || p.category === 'metal'
-                  ? 'border-amber-400/80 bg-amber-500/[0.15] text-amber-200 shadow-[0_0_16px_rgba(245,158,11,0.16)]'
+                  ? 'border-amber-400/80 bg-amber-500/[0.15] text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.16)]'
                   : p.category === 'stock'
-                    ? 'border-sky-400/80 bg-sky-500/[0.15] text-sky-200 shadow-[0_0_16px_rgba(56,189,248,0.16)]'
-                    : 'border-emerald-400/80 bg-emerald-500/[0.15] text-emerald-200 shadow-[0_0_16px_rgba(16,185,129,0.16)]';
+                    ? 'border-sky-400/80 bg-sky-500/[0.15] text-sky-200 shadow-[0_0_14px_rgba(56,189,248,0.16)]'
+                    : 'border-emerald-400/80 bg-emerald-500/[0.15] text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.16)]';
               return (
                 <button
                   key={p.id}
                   type="button"
                   onClick={() => onSelectPair(p.id)}
                   aria-pressed={active}
-                  className={`flex min-h-[54px] min-w-[74px] shrink-0 flex-col items-center justify-center rounded-xl border px-2 py-1.5 transition-all duration-150 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+                  className={`flex h-[46px] min-w-[68px] shrink-0 flex-col items-center justify-center rounded-xl border px-1.5 transition-all duration-150 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                     active
                       ? activeStyle
                       : 'surface-glass border-white/[0.08] text-slate-200 hover:border-white/[0.18]'
                   }`}
                 >
-                  <span className="whitespace-nowrap text-xs font-extrabold tracking-tight sm:text-sm">
+                  <span className="whitespace-nowrap text-xs font-extrabold leading-tight tracking-tight sm:text-[13px]">
                     {p.label}
                   </span>
                   <span
-                    className={`mt-0.5 whitespace-nowrap font-mono text-[10.5px] tabular-nums ${
+                    className={`whitespace-nowrap font-mono text-[10px] leading-tight tabular-nums ${
                       active ? 'opacity-90' : 'text-slate-400'
                     }`}
                   >
-                    ไม้ 1: {formatLot(p.firstLot, p)}
+                    ไม้1: {formatLot(p.firstLot, p)}
                   </span>
                 </button>
               );
@@ -163,38 +166,38 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
           {pairs.length > 4 && (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#06090F] to-transparent"
+              className="pointer-events-none absolute inset-y-0 right-0 w-5 bg-gradient-to-l from-[#06090F] to-transparent"
             />
           )}
         </div>
 
-        {/* + Add Stock / Instrument Button */}
         <button
           type="button"
           onClick={onOpenSymbolManager}
           data-testid="add-symbol-btn"
           aria-label="เพิ่มหุ้นหรือสินทรัพย์อื่น"
-          className="surface-glass flex min-h-[54px] w-[50px] shrink-0 flex-col items-center justify-center rounded-xl border border-dashed border-emerald-400/40 text-emerald-300 transition-colors hover:border-emerald-400 hover:bg-emerald-500/[0.12] active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+          className="surface-glass flex h-[46px] w-[46px] shrink-0 flex-col items-center justify-center rounded-xl border border-dashed border-emerald-400/45 text-emerald-300 transition-colors hover:border-emerald-400 hover:bg-emerald-500/[0.12] active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
-          <span className="mt-0.5 text-[10px] font-bold leading-none">เพิ่ม</span>
+          <span className="text-[9px] font-bold leading-none">เพิ่ม</span>
         </button>
       </div>
 
-      {/* 2. Vantage Live Bid / Offer Dealing Desk + Stale Alert */}
+      {/* 2. Institutional Live Bid / Offer Dealing Desk + Micro Sparkline */}
       <BidOfferDeck
         pair={pair}
         quote={activeQuote}
         accountType={accountType}
+        wsConnected={wsConnected}
         feedHealth={feedHealth}
         isRefreshing={isRefreshingQuotes}
         onRefresh={onRefreshQuotes}
       />
 
-      {/* 3. Hero 2nd-Order Result Card (Carbon Mesh Texture + Primary CTAs) */}
+      {/* 3. Compact Hero 2nd-Order Lot Card (Carbon Mesh + Copy + MT5/TV + Inline R:R) */}
       <section
         aria-label="ผลลัพธ์ขนาด Lot ไม้ที่ 2"
-        className={`card-pattern-mesh rounded-2xl border p-4 transition-colors duration-200 ${
+        className={`card-pattern-mesh shrink-0 rounded-2xl border px-3.5 py-2.5 transition-colors duration-200 ${
           isDanger
             ? 'border-rose-500/55'
             : isAmberTheme
@@ -204,53 +207,28 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
                 : 'border-white/[0.1]'
         }`}
       >
-        {/* Top Metadata + Risk Limit Button */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5 truncate text-xs text-slate-400">
-            <span className="whitespace-nowrap">
-              ไม้ 1:{' '}
-              <strong className="font-mono font-semibold text-slate-100 tabular-nums">
-                {formatLot(pair.firstLot, pair)}
-              </strong>
-            </span>
-            <span aria-hidden="true">·</span>
-            <span
-              className={`truncate whitespace-nowrap ${
-                isAmberTheme
-                  ? 'font-semibold text-amber-300'
-                  : isStockTheme
-                    ? 'font-semibold text-sky-300'
-                    : ''
-              }`}
-            >
-              {pair.mt5Symbol} · Step {formatLot(pair.lotStep, pair)}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={onOpenRiskModal}
-            aria-label={`แก้ไข Risk Limit ปัจจุบัน ${riskUsd} ดอลลาร์`}
-            className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-white/[0.1] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          >
-            <span className="text-slate-400">Risk</span>
-            <span className="font-mono font-bold text-emerald-400 tabular-nums">
-              ${riskUsd}
-            </span>
-            <Pencil className="h-3 w-3 text-slate-400" aria-hidden="true" />
-          </button>
-        </div>
-
-        {/* Dominant 2nd-Order Lot Readout + Copy Button */}
-        <div className="mt-3 flex items-center justify-between gap-3">
+        {/* Row 1: Big 2nd-Order Lot Readout + Primary Copy Button */}
+        <div className="flex items-center justify-between gap-2.5">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-slate-400">
-              ขนาดไม้ที่ 2 ({unit})
-            </p>
-            <div className="mt-1 flex items-baseline gap-1.5">
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span className="font-medium">ไม้ที่ 2 ({unit})</span>
+              <span aria-hidden="true">·</span>
+              <span
+                className={`truncate font-mono ${
+                  isAmberTheme
+                    ? 'font-semibold text-amber-300'
+                    : isStockTheme
+                      ? 'font-semibold text-sky-300'
+                      : 'text-slate-300'
+                }`}
+              >
+                Step {formatLot(pair.lotStep, pair)}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
               <output
                 data-testid="lot2-output"
-                className={`font-mono text-5xl font-extrabold leading-none tracking-tight tabular-nums ${
+                className={`font-mono text-[42px] font-extrabold leading-none tracking-tight tabular-nums sm:text-5xl ${
                   isDanger
                     ? 'text-rose-400'
                     : isReady
@@ -264,7 +242,7 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
               >
                 {lot2Display}
               </output>
-              <span className="text-sm font-semibold text-slate-400">{unit}</span>
+              <span className="text-xs font-bold text-slate-400">{unit}</span>
             </div>
           </div>
 
@@ -273,25 +251,25 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
             onClick={onCopyLot}
             disabled={!isReady}
             data-testid="copy-lot-btn"
-            className={`inline-flex h-14 min-w-[126px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 text-sm font-extrabold transition-transform duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+            className={`inline-flex h-12 min-w-[116px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3.5 text-sm font-extrabold transition-transform duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
               copiedLot
                 ? 'bg-white text-[#06090F]'
                 : isReady
                   ? isAmberTheme
-                    ? 'bg-amber-400 text-[#090D14] shadow-[0_8px_20px_rgba(245,158,11,0.28)] hover:bg-amber-300'
+                    ? 'bg-amber-400 text-[#090D14] shadow-[0_6px_18px_rgba(245,158,11,0.28)] hover:bg-amber-300'
                     : isStockTheme
-                      ? 'bg-sky-400 text-[#05101A] shadow-[0_8px_20px_rgba(56,189,248,0.28)] hover:bg-sky-300'
-                      : 'bg-emerald-400 text-[#04140D] shadow-[0_8px_20px_rgba(16,185,129,0.28)] hover:bg-emerald-300'
+                      ? 'bg-sky-400 text-[#05101A] shadow-[0_6px_18px_rgba(56,189,248,0.28)] hover:bg-sky-300'
+                      : 'bg-emerald-400 text-[#04140D] shadow-[0_6px_18px_rgba(16,185,129,0.28)] hover:bg-emerald-300'
                   : ''
             }`}
           >
             {copiedLot ? (
               <>
                 <Check className="h-4 w-4" aria-hidden="true" />
-                <span className="font-mono tabular-nums">คัดลอก {copiedLot}</span>
+                <span className="font-mono tabular-nums">{copiedLot}</span>
               </>
             ) : isDanger ? (
-              <span>ห้ามเปิดเพิ่ม</span>
+              <span>ห้ามเปิด</span>
             ) : isReady ? (
               <>
                 <Copy className="h-4 w-4" aria-hidden="true" />
@@ -303,53 +281,28 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
           </button>
         </div>
 
-        {/* 1-Tap Quick Launch Shortcuts: MT5 & TradingView */}
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => onOpenMt5(isReady)}
-            data-testid="shortcut-mt5-btn"
-            className="inline-flex min-h-[42px] items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-emerald-400/30 bg-emerald-500/[0.1] px-3 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/[0.18] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          >
-            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
-            <span className="truncate">
-              {isReady ? 'คัดลอก & เปิด MT5' : 'เปิดแอป MT5'}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenTradingView}
-            data-testid="shortcut-tv-btn"
-            className="inline-flex min-h-[42px] items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-sky-400/30 bg-sky-500/[0.1] px-3 text-xs font-bold text-sky-200 transition-colors hover:bg-sky-500/[0.18] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-          >
-            <CandlestickChart className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-hidden="true" />
-            <span className="truncate">กราฟ TradingView</span>
-          </button>
-        </div>
-
-        {/* Safety / Edge-Case Alert */}
+        {/* Safety / Edge-Case Alert (only shown when triggered) */}
         {(isDanger || result.warning) && (
           <div
             role="alert"
-            className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs font-medium ${
+            className={`mt-2 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium ${
               isDanger
                 ? 'bg-rose-500/[0.16] text-rose-200'
                 : 'bg-amber-500/[0.16] text-amber-200'
             }`}
           >
             <AlertTriangle
-              className={`mt-0.5 h-4 w-4 shrink-0 ${
+              className={`h-3.5 w-3.5 shrink-0 ${
                 isDanger ? 'text-rose-400' : 'text-amber-400'
               }`}
               aria-hidden="true"
             />
-            <span>{isDanger ? result.message : result.warning}</span>
+            <span className="truncate">{isDanger ? result.message : result.warning}</span>
           </div>
         )}
 
-        {/* Risk Utilization Progress & Breakdown */}
-        <div className="mt-3.5 space-y-1.5">
+        {/* Dual-Color Risk Bar + Compact Breakdown */}
+        <div className="mt-2 space-y-1">
           <div
             className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]"
             aria-hidden="true"
@@ -372,16 +325,16 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
             />
           </div>
 
-          <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-            <span className="tabular-nums">
-              รวม 2 ไม้:{' '}
+          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400 tabular-nums">
+            <span>
+              รวม:{' '}
               <strong className="font-mono font-semibold text-slate-100">
                 {isReady || isDanger
                   ? `${formatLot(result.totalLot, pair)} ${unit}`
                   : `-- ${unit}`}
               </strong>
             </span>
-            <span className="tabular-nums">
+            <span>
               เสี่ยงจริง:{' '}
               <strong
                 className={`font-mono font-semibold ${
@@ -394,92 +347,94 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
           </div>
         </div>
 
-        {/* Optional R:R Ratio Input (1:2, 1:3) & Projected Take Profit */}
-        <div className="mt-3 border-t border-white/[0.07] pt-2.5">
-          <div className="flex items-center justify-between gap-2">
+        {/* 1-Tap Quick Launch Shortcuts: MT5 & TradingView */}
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => onOpenMt5(isReady)}
+            data-testid="shortcut-mt5-btn"
+            className="inline-flex h-[36px] items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-emerald-400/30 bg-emerald-500/[0.11] px-2.5 text-[11.5px] font-bold text-emerald-200 transition-colors hover:bg-emerald-500/[0.2] active:scale-[0.97]"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+            <span className="truncate">
+              {isReady ? 'คัดลอก & เปิด MT5' : 'เปิดแอป MT5'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenTradingView}
+            data-testid="shortcut-tv-btn"
+            className="inline-flex h-[36px] items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-sky-400/30 bg-sky-500/[0.11] px-2.5 text-[11.5px] font-bold text-sky-200 transition-colors hover:bg-sky-500/[0.2] active:scale-[0.97]"
+          >
+            <CandlestickChart className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-hidden="true" />
+            <span className="truncate">กราฟ TradingView</span>
+          </button>
+        </div>
+
+        {/* Ultra-Compact Inline R:R Selector + Take Profit Output */}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5 border-t border-white/[0.07] pt-2">
+          <div className="flex items-center gap-1">
             <label
               htmlFor="rr-ratio-input"
-              className="whitespace-nowrap text-[11px] font-medium text-slate-400"
+              className="mr-0.5 text-[10.5px] font-semibold text-slate-400"
             >
-              R:R Ratio
+              R:R
             </label>
-
-            <div className="flex items-center gap-1">
-              {APP_CONFIG.RR_PRESETS.map((preset) => {
-                const active = rrRatio.trim() === preset;
-                return (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => onChangeRrRatio(active ? '' : preset)}
-                    aria-pressed={active}
-                    className={`min-h-[30px] whitespace-nowrap rounded-md border px-2 font-mono text-[11px] font-semibold tabular-nums transition-colors ${
-                      active
-                        ? 'border-emerald-400/70 bg-emerald-500/[0.15] text-emerald-300'
-                        : 'border-white/[0.08] bg-[#090D14] text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {preset}
-                  </button>
-                );
-              })}
-
-              <div className="flex items-center rounded-md border border-white/[0.09] bg-[#080C12] pl-2 pr-1 focus-within:border-emerald-400/70">
-                <input
-                  id="rr-ratio-input"
-                  data-testid="rr-ratio-input"
-                  type="text"
-                  inputMode="text"
-                  value={rrRatio}
-                  onChange={(e) => onChangeRrRatio(sanitizeRrInput(e.target.value))}
-                  placeholder="1:2"
-                  aria-label="กำหนดอัตราส่วน R:R เช่น 1:2 หรือ 1:3"
-                  className="h-[28px] w-12 bg-transparent text-right font-mono text-xs font-semibold text-slate-100 outline-none placeholder:text-slate-600 tabular-nums"
-                />
-                {rrRatio.trim() !== '' && (
-                  <button
-                    type="button"
-                    onClick={() => onChangeRrRatio('')}
-                    aria-label="ล้างค่า R:R"
-                    className="ml-0.5 flex h-5 w-5 items-center justify-center rounded text-slate-500 hover:text-slate-200"
-                  >
-                    <X className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                )}
-              </div>
+            {APP_CONFIG.RR_PRESETS.map((preset) => {
+              const active = trimmedRr === preset;
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => onChangeRrRatio(active ? '' : preset)}
+                  aria-pressed={active}
+                  className={`h-[26px] whitespace-nowrap rounded-md border px-1.5 font-mono text-[10.5px] font-semibold tabular-nums transition-colors ${
+                    active
+                      ? 'border-emerald-400/75 bg-emerald-500/[0.16] text-emerald-300'
+                      : 'border-white/[0.08] bg-[#080C12] text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              );
+            })}
+            <div className="flex items-center rounded-md border border-white/[0.09] bg-[#080C12] pl-1.5 pr-0.5 focus-within:border-emerald-400/70">
+              <input
+                id="rr-ratio-input"
+                data-testid="rr-ratio-input"
+                type="text"
+                inputMode="text"
+                value={rrRatio}
+                onChange={(e) => onChangeRrRatio(sanitizeRrInput(e.target.value))}
+                placeholder="1:2"
+                aria-label="กำหนดอัตราส่วน R:R เช่น 1:2 หรือ 1:3"
+                className="h-[24px] w-10 bg-transparent text-right font-mono text-[11px] font-semibold text-slate-100 outline-none placeholder:text-slate-600 tabular-nums"
+              />
+              {trimmedRr !== '' && (
+                <button
+                  type="button"
+                  onClick={() => onChangeRrRatio('')}
+                  aria-label="ล้างค่า R:R"
+                  className="flex h-4 w-4 items-center justify-center text-slate-500 hover:text-slate-200"
+                >
+                  <X className="h-2.5 w-2.5" aria-hidden="true" />
+                </button>
+              )}
             </div>
           </div>
 
-          {(() => {
-            const trimmedRr = rrRatio.trim();
-            if (!trimmedRr) return null;
-            const parsedRatio = parseRrRatio(trimmedRr);
-
-            if (parsedRatio === null) {
-              return (
-                <p role="alert" className="mt-1.5 text-[11px] text-amber-300/90">
-                  กรอกรูปแบบ R:R เช่น 1:2, 1:3 หรือ 2.5
-                </p>
-              );
-            }
-
-            const riskBudgetTp = riskUsd * parsedRatio;
-            return (
-              <div className="mt-2 flex items-baseline justify-between gap-2 text-xs tabular-nums">
-                <div className="min-w-0 truncate text-slate-400">
-                  <span>Take Profit ไม้ 2</span>
-                  <span className="mx-1 text-slate-600" aria-hidden="true">
-                    ·
-                  </span>
-                  <span className="text-[11px] text-slate-500">
-                    {projectedTp
-                      ? `รวม +$${projectedTp.combinedProfitUsd.toFixed(2)}`
-                      : `กรอบ Risk $${riskUsd}: +$${riskBudgetTp.toFixed(2)}`}
-                  </span>
-                </div>
+          <div className="ml-auto flex items-center gap-1 text-[11px] tabular-nums">
+            {isRrInvalid ? (
+              <span role="alert" className="text-[10.5px] text-amber-300">
+                ใส่เช่น 1:2
+              </span>
+            ) : (
+              <>
+                <span className="text-slate-400">TP:</span>
                 <output
                   data-testid="projected-tp-output"
-                  className={`shrink-0 font-mono text-sm font-bold ${
+                  className={`font-mono text-xs font-extrabold ${
                     projectedTp ? 'text-emerald-400' : 'text-slate-500'
                   }`}
                 >
@@ -487,26 +442,53 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
                     ? `+$${projectedTp.secondOrderProfitUsd.toFixed(2)}`
                     : '--'}
                 </output>
-              </div>
-            );
-          })()}
+              </>
+            )}
+          </div>
         </div>
       </section>
 
-      {/* 4. SL Input Display + Mode Toggle (USD Loss / Points) */}
+      {/* 4. Compact Single-Row SL Input Bar + USD/PTS Mode Switch (52px) */}
       <section
         aria-label="กรอกระยะ SL หรือยอดขาดทุนไม้แรก"
-        className="surface-glass rounded-2xl border border-white/[0.08] px-3.5 py-2.5"
+        className="surface-glass flex shrink-0 items-center justify-between gap-2 rounded-2xl border border-white/[0.08] px-3 py-2"
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-xs font-medium text-slate-400">
-            {mode === 'USD'
-              ? `ยอดติดลบไม้ ${formatLot(pair.firstLot, pair)} ${unit} (เส้นแดง MT5)`
-              : pair.pointHint}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span
+            className={`shrink-0 font-mono text-lg font-bold ${
+              mode === 'USD' ? 'text-rose-400' : 'text-sky-400'
+            }`}
+          >
+            {mode === 'USD' ? '-$' : 'PTS'}
           </span>
+          <div className="flex min-w-0 items-center overflow-hidden">
+            <span
+              data-testid="sl-input-display"
+              className={`truncate font-mono text-2xl font-extrabold tracking-tight tabular-nums ${
+                inputStr ? 'text-slate-100' : 'text-base font-medium text-slate-500'
+              }`}
+            >
+              {inputStr ||
+                (mode === 'USD'
+                  ? `SL ไม้ ${formatLot(pair.firstLot, pair)} (เช่น ${pair.placeholderUsd})`
+                  : `ระยะจุด (เช่น ${pair.placeholderPts})`)}
+            </span>
+            <span
+              aria-hidden="true"
+              className={`ml-0.5 inline-block h-6 w-0.5 shrink-0 rounded-full animate-cursor-blink ${
+                isAmberTheme
+                  ? 'bg-amber-400'
+                  : isStockTheme
+                    ? 'bg-sky-400'
+                    : 'bg-emerald-400'
+              }`}
+            />
+          </div>
+        </div>
 
+        <div className="flex shrink-0 items-center gap-1.5">
           <div
-            className="inline-flex shrink-0 items-center rounded-lg border border-white/[0.06] bg-[#080C12] p-0.5"
+            className="inline-flex items-center rounded-lg border border-white/[0.07] bg-[#080C12] p-0.5"
             role="tablist"
             aria-label="โหมดการกรอก SL"
           >
@@ -515,62 +497,27 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
               role="tab"
               aria-selected={mode === 'USD'}
               onClick={() => onChangeMode('USD')}
-              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+              className={`whitespace-nowrap rounded-md px-2 py-1 text-[10.5px] font-bold transition-colors ${
                 mode === 'USD'
                   ? 'bg-[#1D2738] text-slate-100'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              USD Loss
+              USD
             </button>
             <button
               type="button"
               role="tab"
               aria-selected={mode === 'PTS'}
               onClick={() => onChangeMode('PTS')}
-              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+              className={`whitespace-nowrap rounded-md px-2 py-1 text-[10.5px] font-bold transition-colors ${
                 mode === 'PTS'
                   ? 'bg-[#1D2738] text-slate-100'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Points
+              PTS
             </button>
-          </div>
-        </div>
-
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span
-              className={`font-mono text-xl font-bold ${
-                mode === 'USD' ? 'text-rose-400' : 'text-sky-400'
-              }`}
-            >
-              {mode === 'USD' ? '-$' : 'PTS'}
-            </span>
-            <div className="flex min-w-0 items-center overflow-hidden">
-              <span
-                data-testid="sl-input-display"
-                className={`truncate font-mono text-3xl font-bold tracking-tight tabular-nums ${
-                  inputStr ? 'text-slate-100' : 'text-xl font-medium text-slate-600'
-                }`}
-              >
-                {inputStr ||
-                  (mode === 'USD'
-                    ? `เช่น ${pair.placeholderUsd}`
-                    : `เช่น ${pair.placeholderPts}`)}
-              </span>
-              <span
-                aria-hidden="true"
-                className={`ml-0.5 inline-block h-7 w-0.5 rounded-full animate-cursor-blink ${
-                  isAmberTheme
-                    ? 'bg-amber-400'
-                    : isStockTheme
-                      ? 'bg-sky-400'
-                      : 'bg-emerald-400'
-                }`}
-              />
-            </div>
           </div>
 
           <button
@@ -578,35 +525,16 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
             onClick={() => onNumpadKey('CLEAR')}
             aria-label="ล้างค่าที่กรอก"
             disabled={!inputStr}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-slate-300 transition-colors hover:bg-white/[0.12] active:scale-95 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-slate-300 transition-colors hover:bg-white/[0.12] active:scale-95 disabled:opacity-30"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-
-        {mode === 'PTS' && (
-          <div className="mt-2 flex items-center justify-between border-t border-white/[0.06] pt-2 text-[11px] text-slate-400 tabular-nums">
-            <span>
-              มูลค่าต่อ Pip/จุด (1 {unit}) ≈{' '}
-              <strong className="font-mono text-slate-200">
-                ${result.pipValuePerFullLot.toFixed(2)}
-              </strong>
-            </span>
-            {result.loss1 > 0 && (
-              <span>
-                ไม้ 1 เสี่ยง ≈{' '}
-                <strong className="font-mono text-sky-300">
-                  ${result.loss1.toFixed(2)}
-                </strong>
-              </span>
-            )}
-          </div>
-        )}
       </section>
 
-      {/* 5. Sculpted One-Handed Financial Numpad (Thumb Zone) */}
+      {/* 5. Flexible One-Handed Financial Numpad (Auto-Fits Remaining iPhone Height — Even 667px SE!) */}
       <div
-        className="grid grid-cols-3 gap-2"
+        className="grid min-h-0 flex-1 grid-cols-3 grid-rows-4 gap-1.5 lg:min-h-[216px] lg:max-h-[244px]"
         role="group"
         aria-label="แป้นตัวเลขความเร็วสูง"
       >
@@ -619,7 +547,7 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
                 type="button"
                 onClick={() => onNumpadKey('DEL')}
                 aria-label="ลบตัวเลข"
-                className="flex h-[52px] items-center justify-center rounded-xl border border-white/[0.07] bg-[#0D121B] text-slate-300 transition-transform duration-100 hover:bg-[#17202E] active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                className="flex h-full min-h-0 items-center justify-center rounded-xl border border-white/[0.07] bg-[#0D121B] text-slate-300 transition-transform duration-100 hover:bg-[#17202E] active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
               >
                 <Delete className="h-5 w-5" aria-hidden="true" />
               </button>
@@ -632,7 +560,7 @@ export const CalculatorTerminal: React.FC<CalculatorTerminalProps> = ({
               onClick={() => onNumpadKey(key)}
               disabled={isDotDisabled}
               aria-label={key === '.' ? 'จุดทศนิยม' : `เลข ${key}`}
-              className={`numpad-key flex h-[52px] items-center justify-center rounded-xl border border-white/[0.08] font-mono text-2xl font-semibold transition-transform duration-100 hover:border-white/[0.16] active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+              className={`numpad-key flex h-full min-h-0 items-center justify-center rounded-xl border border-white/[0.08] font-mono text-xl font-semibold transition-transform duration-100 hover:border-white/[0.16] active:scale-[0.95] sm:text-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                 key === '.'
                   ? 'text-slate-300 disabled:opacity-25'
                   : 'text-slate-100'

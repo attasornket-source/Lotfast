@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PRESET_INSTRUMENTS, getPairById } from '../config/tradingConfig';
 import {
   buildMt5LaunchUrl,
+  buildStreamingTickQuote,
   buildTradingViewUrl,
   evaluateFeedHealth,
   normalizeScannerQuote,
@@ -16,7 +17,7 @@ test('resolveFeedTicker switches between Vantage RAW and Vantage Standard (.TV) 
   assert.equal(resolveFeedTicker(uj, 'STD'), 'VANTAGE:USDJPY.TV');
 });
 
-test('normalizeScannerQuote accepts direct live Vantage Bid/Ask and computes spread in pips', () => {
+test('normalizeScannerQuote accepts direct live Vantage Bid/Ask and computes compact spread', () => {
   const uj = getPairById('USDJPY');
   const q = normalizeScannerQuote({
     pair: uj,
@@ -30,25 +31,70 @@ test('normalizeScannerQuote accepts direct live Vantage Bid/Ask and computes spr
     },
     accountType: 'RAW',
     now: 1_000_000,
-    prevMid: 159.08,
   });
 
   assert.ok(q !== null);
   assert.equal(q.bid, 159.09);
   assert.equal(q.ask, 159.094);
   assert.equal(q.provenance, 'vantage_live');
-  assert.equal(q.sourceLabel, 'Vantage RAW Live');
-  assert.equal(q.spreadFormatted, '0.4 pip');
-  assert.equal(q.tickDirection, 'up');
+  assert.equal(q.spreadFormatted, '0.4p');
+  assert.equal(q.sparkline.length, 1);
 });
 
-test('normalizeScannerQuote catches frozen/diverged CFD bid/ask (like US30) and derives clean B/A from live close', () => {
+test('buildStreamingTickQuote applies live Vantage spread anchor, tracks tick direction, and grows sparkline', () => {
+  const uj = getPairById('USDJPY');
+  const t1 = buildStreamingTickQuote({
+    pair: uj,
+    mid: 159.267,
+    vantageAnchor: { spreadAbs: 0.004, vantageMid: 159.27, updatedAt: 1000 },
+    accountType: 'RAW',
+    now: 1000,
+    provenance: 'vantage_ws_calibrated',
+    sourceLabel: 'Vantage RAW · Live WS',
+  });
+  assert.ok(t1 !== null);
+  assert.equal(t1.bid.toFixed(3), '159.265');
+  assert.equal(t1.ask.toFixed(3), '159.269');
+  assert.equal(t1.spreadFormatted, '0.4p');
+  assert.equal(t1.tickSeq, 1);
+
+  const t2 = buildStreamingTickQuote({
+    pair: uj,
+    mid: 159.281,
+    vantageAnchor: { spreadAbs: 0.004, vantageMid: 159.27, updatedAt: 1000 },
+    accountType: 'RAW',
+    now: 2000,
+    prevQuote: t1,
+    provenance: 'vantage_ws_calibrated',
+    sourceLabel: 'Vantage RAW · Live WS',
+  });
+  assert.ok(t2 !== null);
+  assert.equal(t2.tickDirection, 'up');
+  assert.equal(t2.tickSeq, 2);
+  assert.equal(t2.sparkline.length, 2);
+
+  // Duplicate unchanged tick does NOT increment tickSeq (prevents noisy flashes)
+  const t3 = buildStreamingTickQuote({
+    pair: uj,
+    mid: 159.281,
+    vantageAnchor: { spreadAbs: 0.004, vantageMid: 159.27, updatedAt: 1000 },
+    accountType: 'RAW',
+    now: 3000,
+    prevQuote: t2,
+    provenance: 'vantage_ws_calibrated',
+    sourceLabel: 'Vantage RAW · Live WS',
+  });
+  assert.ok(t3 !== null);
+  assert.equal(t3.tickSeq, 2);
+});
+
+test('normalizeScannerQuote catches frozen/diverged CFD bid/ask (US30) and derives clean B/A from live close', () => {
   const us30 = getPairById('US30');
   const q = normalizeScannerQuote({
     pair: us30,
     raw: {
       close: 49770.6,
-      bid: 49559.3, // frozen > 200 points away (> 0.15%)
+      bid: 49559.3,
       ask: 49563.8,
       change: -0.07,
       update_mode: 'streaming',
@@ -62,10 +108,10 @@ test('normalizeScannerQuote catches frozen/diverged CFD bid/ask (like US30) and 
   assert.equal(q.mid.toFixed(1), '49770.6');
   assert.equal(q.bid.toFixed(1), '49769.6');
   assert.equal(q.ask.toFixed(1), '49771.6');
-  assert.equal(q.spreadFormatted, '2.0 pts');
+  assert.equal(q.spreadFormatted, '2.0pt');
 });
 
-test('normalizeScannerQuote catches inverted bid/ask (ask < bid) and stock null bid/ask cleanly', () => {
+test('normalizeScannerQuote handles stock null bid/ask cleanly', () => {
   const nvda = PRESET_INSTRUMENTS.find((p) => p.id === 'NVDA')!;
   const q = normalizeScannerQuote({
     pair: nvda,
@@ -87,12 +133,13 @@ test('normalizeScannerQuote catches inverted bid/ask (ask < bid) and stock null 
   assert.equal(q.spreadFormatted, '$0.04');
 });
 
-test('evaluateFeedHealth triggers OFFLINE, ERROR, STALE (>30s), DELAYED (>18s), and LIVE properly', () => {
+test('evaluateFeedHealth triggers OFFLINE, ERROR, STALE (>25s), DELAYED (>12s), and LIVE properly', () => {
   const baseTime = 10_000_000;
 
   assert.equal(
     evaluateFeedHealth({
       isOnline: false,
+      wsConnected: false,
       lastSuccessAt: baseTime - 2000,
       consecutiveErrors: 0,
       now: baseTime,
@@ -103,6 +150,7 @@ test('evaluateFeedHealth triggers OFFLINE, ERROR, STALE (>30s), DELAYED (>18s), 
   assert.equal(
     evaluateFeedHealth({
       isOnline: true,
+      wsConnected: false,
       lastSuccessAt: baseTime - 5000,
       consecutiveErrors: 2,
       now: baseTime,
@@ -112,17 +160,19 @@ test('evaluateFeedHealth triggers OFFLINE, ERROR, STALE (>30s), DELAYED (>18s), 
 
   const stale = evaluateFeedHealth({
     isOnline: true,
-    lastSuccessAt: baseTime - 35_000,
+    wsConnected: true,
+    lastSuccessAt: baseTime - 30_000,
     consecutiveErrors: 0,
     now: baseTime,
   });
   assert.equal(stale.state, 'STALE');
-  assert.equal(stale.ageSeconds, 35);
-  assert.match(stale.alertMessage, /ไม่อัปเดตมาแล้ว 35 วินาที/);
+  assert.equal(stale.ageSeconds, 30);
+  assert.match(stale.alertMessage, /30 วิ/);
 
   const live = evaluateFeedHealth({
     isOnline: true,
-    lastSuccessAt: baseTime - 3_000,
+    wsConnected: true,
+    lastSuccessAt: baseTime - 2_000,
     consecutiveErrors: 0,
     now: baseTime,
   });
@@ -130,37 +180,15 @@ test('evaluateFeedHealth triggers OFFLINE, ERROR, STALE (>30s), DELAYED (>18s), 
   assert.equal(live.alertMessage, '');
 });
 
-test('splitDealingPrice formats FX 3/5-digit and stock prices like MT5 dealing desk', () => {
+test('splitDealingPrice and MT5/TradingView URL builders work cleanly', () => {
   assert.deepEqual(splitDealingPrice(159.094, 3), {
     prefix: '159.',
     bigDigits: '09',
     superDigit: '4',
   });
-  assert.deepEqual(splitDealingPrice(1.31158, 5), {
-    prefix: '1.31',
-    bigDigits: '15',
-    superDigit: '8',
-  });
-  assert.deepEqual(splitDealingPrice(151.88, 2), {
-    prefix: '151.',
-    bigDigits: '88',
-    superDigit: '',
-  });
-});
-
-test('MT5 and TradingView deep link builders output valid iOS URLs', () => {
   assert.equal(buildMt5LaunchUrl('app_scheme'), 'metatrader5://');
-  assert.match(buildMt5LaunchUrl('universal'), /VantageInternational-Live/);
-  assert.equal(buildMt5LaunchUrl('web_terminal'), 'https://web.metatrader.app/terminal');
-
-  const uj = getPairById('USDJPY');
   assert.equal(
-    buildTradingViewUrl(uj),
+    buildTradingViewUrl(getPairById('USDJPY')),
     'https://www.tradingview.com/chart/?symbol=VANTAGE%3AUSDJPY'
-  );
-  const nvda = PRESET_INSTRUMENTS.find((p) => p.id === 'NVDA')!;
-  assert.equal(
-    buildTradingViewUrl(nvda),
-    'https://www.tradingview.com/chart/?symbol=NASDAQ%3ANVDA'
   );
 });

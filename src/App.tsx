@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   BookOpen,
   Lock,
-  Radio,
+  Pencil,
   Settings,
   X,
 } from 'lucide-react';
@@ -13,6 +12,7 @@ import {
   STORAGE_KEYS,
   getPairById,
   type InputMode,
+  type MetaApiDirectConfig,
   type Mt5LaunchMode,
   type PairId,
   type PairSpec,
@@ -155,6 +155,30 @@ function readInitialMt5Mode(): Mt5LaunchMode {
   return 'app_scheme';
 }
 
+function readInitialMetaApiConfig(): MetaApiDirectConfig {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.METAAPI_CONFIG);
+    if (!raw) {
+      return { enabled: false, token: '', accountId: '', region: 'singapore' };
+    }
+    const parsed = JSON.parse(raw) as Partial<MetaApiDirectConfig>;
+    return {
+      enabled: Boolean(parsed.enabled),
+      token: typeof parsed.token === 'string' ? parsed.token : '',
+      accountId: typeof parsed.accountId === 'string' ? parsed.accountId : '',
+      region:
+        parsed.region === 'london' ||
+        parsed.region === 'new-york' ||
+        parsed.region === 'vint-hill' ||
+        parsed.region === 'singapore'
+          ? parsed.region
+          : 'singapore',
+    };
+  } catch {
+    return { enabled: false, token: '', accountId: '', region: 'singapore' };
+  }
+}
+
 export default function App() {
   const [isUnlocked, setIsUnlocked] = useState<boolean>(readInitialUnlocked);
   const [pinCode, setPinCode] = useState<string>(readInitialPin);
@@ -179,6 +203,8 @@ export default function App() {
     useState<VantageAccountType>(readInitialVantageAccount);
   const [mt5LaunchMode, setMt5LaunchMode] =
     useState<Mt5LaunchMode>(readInitialMt5Mode);
+  const [metaApiConfig, setMetaApiConfig] =
+    useState<MetaApiDirectConfig>(readInitialMetaApiConfig);
 
   const [history, setHistory] = useState<CalcHistoryItem[]>(readInitialHistory);
   const [infoTab, setInfoTab] = useState<InfoTab>('specs');
@@ -200,6 +226,7 @@ export default function App() {
     quotes,
     activeQuote,
     rates,
+    wsConnected,
     lastSuccessAt,
     feedHealth,
     isRefreshing,
@@ -208,22 +235,17 @@ export default function App() {
     pairs: allPairs,
     activePairId: pairId,
     accountType: vantageAccountType,
+    metaApiConfig,
     isOnline,
   });
 
-  // Cleanup timers on unmount (fixes memory leak from v1.1.1)
   useEffect(() => {
     return () => {
-      if (copyTimeoutRef.current !== null) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-      if (toastTimeoutRef.current !== null) {
-        window.clearTimeout(toastTimeoutRef.current);
-      }
+      if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
+      if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
     };
   }, []);
 
-  // Register VitePWA service worker and watch for updates
   useEffect(() => {
     try {
       const updateSW = registerSW({
@@ -234,18 +256,14 @@ export default function App() {
       });
       updateSwRef.current = updateSW;
     } catch {
-      // ignore if service worker unsupported
+      // ignore if SW unsupported
     }
   }, []);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
-    if (toastTimeoutRef.current !== null) {
-      window.clearTimeout(toastTimeoutRef.current);
-    }
-    toastTimeoutRef.current = window.setTimeout(() => {
-      setToastMsg(null);
-    }, 2200);
+    if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = window.setTimeout(() => setToastMsg(null), 2200);
   }, []);
 
   const activePair = useMemo(
@@ -421,6 +439,15 @@ export default function App() {
     }
   }, []);
 
+  const handleSaveMetaApiConfig = useCallback((cfg: MetaApiDirectConfig) => {
+    setMetaApiConfig(cfg);
+    try {
+      localStorage.setItem(STORAGE_KEYS.METAAPI_CONFIG, JSON.stringify(cfg));
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleCopyLot = useCallback(async () => {
     if (result.status !== 'OK') return false;
     const text = formatLot(result.lot2, result.pair);
@@ -453,12 +480,8 @@ export default function App() {
     }
 
     setCopiedLot(text);
-    if (copyTimeoutRef.current !== null) {
-      window.clearTimeout(copyTimeoutRef.current);
-    }
-    copyTimeoutRef.current = window.setTimeout(() => {
-      setCopiedLot(null);
-    }, 1200);
+    if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = window.setTimeout(() => setCopiedLot(null), 1200);
 
     const entry: CalcHistoryItem = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -620,71 +643,57 @@ export default function App() {
         ? 'bg-terminal-grid-stock'
         : 'bg-terminal-grid';
 
-  const isGlobalAlert =
-    feedHealth.state === 'OFFLINE' ||
-    feedHealth.state === 'ERROR' ||
-    feedHealth.state === 'STALE';
-
   return (
-    <div className={`min-h-dvh text-[#F1F5F9] transition-colors duration-300 ${bgThemeClass}`}>
+    <div
+      className={`flex h-dvh flex-col overflow-hidden text-[#F1F5F9] transition-colors duration-300 lg:h-auto lg:min-h-dvh lg:overflow-visible ${bgThemeClass}`}
+    >
       {/* Private 4-Digit PIN Gate */}
       {!isUnlocked && (
         <PinLockScreen expectedPin={pinCode} onUnlock={handleUnlock} />
       )}
 
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-[#06090F]/85 backdrop-blur-md pt-safe">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+      {/* Compact Top Bar (44px on mobile -> maximizes 1-screen iPhone fit!) */}
+      <header className="shrink-0 border-b border-white/[0.08] bg-[#06090F]/85 backdrop-blur-md pt-safe lg:sticky lg:top-0 lg:z-30">
+        <div className="mx-auto flex h-11 max-w-6xl items-center justify-between gap-2 px-3 sm:px-6 lg:h-14">
           {/* Zone 1: Brand Wordmark */}
           <a
             href="#calculator"
-            className="flex shrink-0 items-center gap-2 whitespace-nowrap text-lg font-extrabold tracking-tight text-slate-100"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base font-extrabold tracking-tight text-slate-100 lg:text-lg"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-400/35 bg-emerald-500/[0.12] font-mono text-xs font-extrabold text-emerald-400">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-400/35 bg-emerald-500/[0.14] font-mono text-[11px] font-extrabold text-emerald-400 lg:h-7 lg:w-7 lg:text-xs">
               LF
             </span>
             <span>{APP_CONFIG.APP_NAME}</span>
           </a>
 
-          {/* Zone 2: Unboxed Broker & Version Info (Desktop) */}
+          {/* Zone 2: Quiet Broker & Version Context (Desktop) */}
           <div className="hidden items-center gap-2 text-xs text-slate-400 lg:flex">
             <span>{APP_CONFIG.BROKER_NAME}</span>
             <span aria-hidden="true">·</span>
-            <span>{vantageAccountType === 'STD' ? 'Standard STP' : 'Raw ECN'}</span>
+            <span>
+              {metaApiConfig.enabled
+                ? 'MT5 Direct 1:1'
+                : vantageAccountType === 'STD'
+                  ? 'Standard STP'
+                  : 'Raw ECN'}
+            </span>
             <span aria-hidden="true">·</span>
             <span className="font-mono text-slate-300">{APP_CONFIG.VERSION}</span>
           </div>
 
-          {/* Zone 3: Live Feed Status + Utility Controls */}
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {/* Zone 3: Risk Limit Quick Trigger + Settings + Lock */}
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
-              onClick={refreshQuotes}
-              disabled={isRefreshing}
-              aria-label={`สถานะราคา ${feedHealth.state} แตะเพื่ออัปเดต`}
-              className={`inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition-colors tabular-nums ${
-                isGlobalAlert
-                  ? 'bg-rose-500/[0.16] text-rose-300'
-                  : 'text-slate-300 hover:bg-white/[0.06]'
-              }`}
+              onClick={() => setRiskModalOpen(true)}
+              aria-label={`แก้ไข Risk Limit ปัจจุบัน ${riskUsd} ดอลลาร์`}
+              className="inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-400/25 bg-emerald-500/[0.1] px-2.5 text-xs font-bold text-slate-100 transition-colors hover:bg-emerald-500/[0.18] active:scale-[0.96] lg:h-9"
             >
-              {isGlobalAlert ? (
-                <AlertTriangle className="h-3.5 w-3.5 text-rose-400" aria-hidden="true" />
-              ) : (
-                <Radio
-                  className={`h-3.5 w-3.5 ${
-                    feedHealth.state === 'LIVE'
-                      ? 'text-emerald-400'
-                      : 'text-amber-400'
-                  }`}
-                  aria-hidden="true"
-                />
-              )}
-              <span className="font-mono">
-                {isGlobalAlert
-                  ? 'STALE'
-                  : `UJ ${rates.USDJPY.toFixed(2)}`}
+              <span className="text-[11px] font-medium text-slate-400">Risk</span>
+              <span className="font-mono text-emerald-400 tabular-nums">
+                ${riskUsd}
               </span>
+              <Pencil className="h-3 w-3 text-slate-400" aria-hidden="true" />
             </button>
 
             <div className="hidden sm:block">
@@ -695,7 +704,7 @@ export default function App() {
               type="button"
               onClick={() => setSettingsModalOpen(true)}
               aria-label="เปิดหน้าตั้งค่า"
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white lg:h-9 lg:w-9"
             >
               <Settings className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -704,7 +713,7 @@ export default function App() {
               type="button"
               onClick={handleLockNow}
               aria-label="ล็อกแอปทันที"
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white lg:h-9 lg:w-9"
             >
               <Lock className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -712,15 +721,15 @@ export default function App() {
         </div>
       </header>
 
-      {/* Auto-Update Banner */}
+      {/* Auto-Update Banner (Only when a new Service Worker is waiting) */}
       {updateAvailable && (
-        <div className="border-b border-emerald-500/30 bg-emerald-500/[0.12]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2 text-xs text-emerald-200 sm:px-6">
-            <span>พบเวอร์ชันใหม่ของ LotFast พร้อมใช้งานแล้ว</span>
+        <div className="shrink-0 border-b border-emerald-500/30 bg-emerald-500/[0.14]">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-1.5 text-[11px] text-emerald-200 sm:px-6">
+            <span>พบเวอร์ชันใหม่พร้อมใช้งาน</span>
             <button
               type="button"
               onClick={handleForceUpdate}
-              className="whitespace-nowrap rounded-lg bg-emerald-400 px-3 py-1 font-bold text-[#04140D]"
+              className="whitespace-nowrap rounded-md bg-emerald-400 px-2.5 py-0.5 font-bold text-[#04140D]"
             >
               อัปเดตทันที
             </button>
@@ -728,14 +737,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content Workspace */}
+      {/* Main Content Workspace: Exact 1-Screen Flex Fit on Mobile, Spacious 2-Col on Desktop */}
       <main
         id="calculator"
-        className="mx-auto max-w-6xl px-3.5 pb-6 pt-3 sm:px-6 lg:py-7 pb-safe"
+        className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-3 pb-2 pt-2 sm:px-6 lg:block lg:py-6 pb-safe"
       >
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-stretch">
+        <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-12 lg:items-stretch lg:gap-6">
           {/* Left Column: Primary One-Handed Calculator Terminal */}
-          <div className="lg:col-span-5">
+          <div className="flex min-h-0 flex-1 flex-col lg:col-span-5">
             <CalculatorTerminal
               pairs={allPairs}
               pairId={pairId}
@@ -743,11 +752,11 @@ export default function App() {
               onOpenSymbolManager={() => setSymbolModalOpen(true)}
               activeQuote={activeQuote}
               accountType={vantageAccountType}
+              wsConnected={wsConnected}
               feedHealth={feedHealth}
               isRefreshingQuotes={isRefreshing}
               onRefreshQuotes={refreshQuotes}
               riskUsd={riskUsd}
-              onOpenRiskModal={() => setRiskModalOpen(true)}
               mode={mode}
               onChangeMode={handleChangeMode}
               inputStr={inputStr}
@@ -762,12 +771,12 @@ export default function App() {
               onOpenTradingView={handleOpenTradingView}
             />
 
-            {/* Mobile Quick Access Strip */}
-            <div className="mt-3 grid grid-cols-3 gap-2 lg:hidden">
+            {/* Compact Bottom Dock on iPhone (36px) */}
+            <div className="mt-1.5 grid shrink-0 grid-cols-3 gap-1.5 pb-0.5 lg:hidden">
               <button
                 type="button"
                 onClick={() => openMobileTab('specs')}
-                className="surface-glass flex min-h-[44px] items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-xs font-semibold text-slate-200 active:scale-[0.97]"
+                className="surface-glass flex h-[36px] items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-[11px] font-semibold text-slate-200 active:scale-[0.97]"
               >
                 <BookOpen className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
                 <span>กระดาน & ประวัติ</span>
@@ -775,16 +784,16 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => openMobileTab('mt5')}
-                className="surface-glass flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-xs font-semibold text-slate-200 active:scale-[0.97]"
+                className="surface-glass flex h-[36px] items-center justify-center whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-[11px] font-semibold text-slate-200 active:scale-[0.97]"
               >
                 ต่อ MT5
               </button>
               <button
                 type="button"
                 onClick={() => openMobileTab('pwa')}
-                className="surface-glass flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-xs font-semibold text-slate-200 active:scale-[0.97]"
+                className="surface-glass flex h-[36px] items-center justify-center whitespace-nowrap rounded-xl border border-white/[0.08] px-2 font-mono text-[11px] font-semibold text-slate-200 active:scale-[0.97]"
               >
-                iPhone · {APP_CONFIG.VERSION}
+                PWA · {APP_CONFIG.VERSION}
               </button>
             </div>
           </div>
@@ -818,8 +827,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Quiet Editorial Footer (Desktop) */}
-        <footer className="mt-7 hidden items-center justify-between border-t border-white/[0.07] pt-4 text-xs text-slate-500 lg:flex">
+        {/* Quiet Editorial Footer (Desktop Only) */}
+        <footer className="mt-6 hidden items-center justify-between border-t border-white/[0.07] pt-3.5 text-xs text-slate-500 lg:flex">
           <div className="flex items-center gap-2">
             <span>{APP_CONFIG.APP_NAME}</span>
             <span aria-hidden="true">·</span>
@@ -835,7 +844,7 @@ export default function App() {
       {toastMsg && (
         <div
           role="status"
-          className="pointer-events-none fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 whitespace-nowrap rounded-full border border-emerald-400/35 bg-[#0D1623]/95 px-4 py-2 text-xs font-bold text-emerald-200 shadow-2xl backdrop-blur-md"
+          className="pointer-events-none fixed bottom-14 left-1/2 z-[70] -translate-x-1/2 whitespace-nowrap rounded-full border border-emerald-400/35 bg-[#0D1623]/95 px-4 py-1.5 text-xs font-bold text-emerald-200 shadow-2xl backdrop-blur-md"
         >
           {toastMsg}
         </div>
@@ -930,6 +939,8 @@ export default function App() {
         onChangeVantageAccountType={handleChangeVantageAccountType}
         mt5LaunchMode={mt5LaunchMode}
         onChangeMt5LaunchMode={handleChangeMt5LaunchMode}
+        metaApiConfig={metaApiConfig}
+        onSaveMetaApiConfig={handleSaveMetaApiConfig}
       />
     </div>
   );

@@ -128,7 +128,7 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
           [
             { id: 'specs', label: 'กระดาน Bid/Offer & ประวัติ' },
             { id: 'mt5', label: 'คีย์ลัด & ต่อ MT5' },
-            { id: 'pwa', label: 'ติดตั้ง iPhone · v2.0' },
+            { id: 'pwa', label: `ติดตั้ง iPhone · ${APP_CONFIG.VERSION}` },
           ] as const
         ).map((tab) => {
           const active = activeTab === tab.id;

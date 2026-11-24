@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import {
   Download,
+  Radio,
   RefreshCw,
   Share,
   X,
 } from 'lucide-react';
 import {
   APP_CONFIG,
+  type MetaApiDirectConfig,
   type Mt5LaunchMode,
   type VantageAccountType,
 } from '../config/tradingConfig';
@@ -148,6 +150,8 @@ interface SettingsModalProps {
   onChangeVantageAccountType: (type: VantageAccountType) => void;
   mt5LaunchMode: Mt5LaunchMode;
   onChangeMt5LaunchMode: (mode: Mt5LaunchMode) => void;
+  metaApiConfig: MetaApiDirectConfig;
+  onSaveMetaApiConfig: (cfg: MetaApiDirectConfig) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -160,6 +164,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeVantageAccountType,
   mt5LaunchMode,
   onChangeMt5LaunchMode,
+  metaApiConfig,
+  onSaveMetaApiConfig,
 }) => {
   const [pinDraft, setPinDraft] = useState('');
   const [pinFeedback, setPinFeedback] = useState<{
@@ -167,12 +173,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     text: string;
   } | null>(null);
 
+  const [metaEnabled, setMetaEnabled] = useState(metaApiConfig.enabled);
+  const [metaToken, setMetaToken] = useState(metaApiConfig.token);
+  const [metaAccountId, setMetaAccountId] = useState(metaApiConfig.accountId);
+  const [metaRegion, setMetaRegion] = useState<MetaApiDirectConfig['region']>(
+    metaApiConfig.region
+  );
+  const [metaSavedMsg, setMetaSavedMsg] = useState('');
+
   React.useEffect(() => {
     if (isOpen) {
       setPinDraft('');
       setPinFeedback(null);
+      setMetaEnabled(metaApiConfig.enabled);
+      setMetaToken(metaApiConfig.token);
+      setMetaAccountId(metaApiConfig.accountId);
+      setMetaRegion(metaApiConfig.region);
+      setMetaSavedMsg('');
     }
-  }, [isOpen]);
+  }, [isOpen, metaApiConfig]);
 
   if (!isOpen) return null;
 
@@ -194,6 +213,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
   };
 
+  const handleSaveMetaApi = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSaveMetaApiConfig({
+      enabled: metaEnabled && Boolean(metaToken.trim() && metaAccountId.trim()),
+      token: metaToken.trim(),
+      accountId: metaAccountId.trim(),
+      region: metaRegion,
+    });
+    setMetaSavedMsg(
+      metaEnabled && metaToken.trim() && metaAccountId.trim()
+        ? 'เปิดใช้งานฟีดตรง Vantage MT5 Direct แล้ว'
+        : 'บันทึกการตั้งค่าแล้ว (ใช้ฟีด Live WebSocket อัตโนมัติ)'
+    );
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 backdrop-blur-sm sm:items-center sm:p-4"
@@ -208,7 +242,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-700 sm:hidden" />
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-100">
-            ตั้งค่า & ความปลอดภัย
+            ตั้งค่า & ฟีดราคา Vantage
           </h2>
           <button
             type="button"
@@ -221,7 +255,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* System Spec Summary */}
-        <div className="mt-4 space-y-2 rounded-xl border border-white/[0.07] bg-[#080C12] p-3.5 text-xs">
+        <div className="mt-3.5 space-y-1.5 rounded-xl border border-white/[0.07] bg-[#080C12] p-3 text-xs">
           <div className="flex justify-between">
             <span className="text-slate-400">เวอร์ชันแอป</span>
             <strong className="font-mono text-emerald-300">
@@ -233,17 +267,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <strong className="text-slate-100">{APP_CONFIG.BROKER_NAME}</strong>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-400">เรท USDJPY อ้างอิง</span>
+            <span className="text-slate-400">เรท USDJPY สด</span>
             <strong className="font-mono text-emerald-400 tabular-nums">
               {usdJpyRate.toFixed(3)}
             </strong>
           </div>
         </div>
 
-        {/* Vantage Bid/Ask Account Type Switch */}
+        {/* Vantage Account Type Switch */}
         <div className="mt-4">
           <span className="mb-1.5 block text-xs font-medium text-slate-400">
-            ประเภทฟีดราคา Bid/Offer โบรก Vantage
+            ประเภทสเปรดโบรก Vantage (โหมด Live WebSocket)
           </span>
           <div className="grid grid-cols-2 gap-2">
             {(
@@ -281,6 +315,87 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
 
+        {/* Optional 1:1 Direct Vantage MT5 Feed via MetaApi Cloud */}
+        <form
+          onSubmit={handleSaveMetaApi}
+          className="mt-4 space-y-2.5 rounded-xl border border-emerald-500/25 bg-[#080C12] p-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Radio className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+              <span className="text-xs font-bold text-slate-100">
+                เชื่อมราคาตรง Vantage MT5 1:1 (MetaApi)
+              </span>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+              <input
+                type="checkbox"
+                checked={metaEnabled}
+                onChange={(e) => setMetaEnabled(e.target.checked)}
+                className="h-4 w-4 accent-emerald-400"
+              />
+              <span>เปิดใช้</span>
+            </label>
+          </div>
+          <p className="text-[11px] leading-relaxed text-slate-400">
+            เสริมสำหรับดึง Bid/Offer ตรงจากเซิร์ฟเวอร์ Vantage MT5 ของคุณทุก 1 วินาที (เก็บ Token เฉพาะในเครื่อง iPhone นี้เท่านั้น)
+          </p>
+          {metaEnabled && (
+            <div className="space-y-2 pt-1">
+              <input
+                type="text"
+                value={metaAccountId}
+                onChange={(e) => setMetaAccountId(e.target.value)}
+                placeholder="MetaApi Account ID (เช่น 4a7b...)"
+                aria-label="MetaApi Account ID"
+                className="w-full rounded-lg border border-white/[0.1] bg-[#0F1520] px-2.5 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400"
+              />
+              <input
+                type="password"
+                value={metaToken}
+                onChange={(e) => setMetaToken(e.target.value)}
+                placeholder="MetaApi API Token"
+                aria-label="MetaApi API Token"
+                className="w-full rounded-lg border border-white/[0.1] bg-[#0F1520] px-2.5 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400"
+              />
+              <div className="flex gap-2">
+                <select
+                  value={metaRegion}
+                  onChange={(e) =>
+                    setMetaRegion(e.target.value as MetaApiDirectConfig['region'])
+                  }
+                  aria-label="MetaApi Region"
+                  className="flex-1 rounded-lg border border-white/[0.1] bg-[#0F1520] px-2.5 py-2 text-xs text-slate-100 outline-none"
+                >
+                  <option value="singapore">Region: Singapore</option>
+                  <option value="london">Region: London</option>
+                  <option value="new-york">Region: New York</option>
+                  <option value="vint-hill">Region: Vint Hill</option>
+                </select>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-extrabold text-[#04140D]"
+                >
+                  บันทึกฟีด
+                </button>
+              </div>
+            </div>
+          )}
+          {!metaEnabled && metaApiConfig.enabled && (
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-white/[0.08] py-1.5 text-xs font-bold text-slate-200"
+            >
+              สลับกลับใช้ Live WebSocket อัตโนมัติ
+            </button>
+          )}
+          {metaSavedMsg && (
+            <p className="text-[11px] font-medium text-emerald-400">
+              {metaSavedMsg}
+            </p>
+          )}
+        </form>
+
         {/* MT5 Shortcut Launch Mode */}
         <div className="mt-4">
           <label
@@ -308,7 +423,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Change 4-digit PIN */}
-        <form onSubmit={handleSavePin} className="mt-4 space-y-2.5">
+        <form onSubmit={handleSavePin} className="mt-4 space-y-2">
           <label
             htmlFor="new-pin-field"
             className="block text-xs font-medium text-slate-400"
