@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Noto Sans Thai", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: #06090f;
+    color: #f1f5f9;
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overflow-x: hidden;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ==================== MODERN ARCHITECTURAL SURFACE PATTERNS ==================== */
+.bg-terminal-grid {
+  background-color: #06090f;
+  background-image:
+    radial-gradient(circle at 12% 0%, rgba(16, 185, 129, 0.12) 0%, transparent 42%),
+    radial-gradient(circle at 88% 8%, rgba(56, 189, 248, 0.08) 0%, transparent 38%),
+    radial-gradient(rgba(148, 163, 184, 0.09) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 22px 22px, 66px 66px, 66px 66px;
+}
+
+.bg-terminal-grid-amber {
+  background-color: #06090f;
+  background-image:
+    radial-gradient(circle at 14% 0%, rgba(245, 158, 11, 0.14) 0%, transparent 44%),
+    radial-gradient(circle at 88% 8%, rgba(234, 88, 12, 0.07) 0%, transparent 38%),
+    radial-gradient(rgba(245, 158, 11, 0.08) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 22px 22px, 66px 66px, 66px 66px;
+}
+
+.bg-terminal-grid-stock {
+  background-color: #06090f;
+  background-image:
+    radial-gradient(circle at 14% 0%, rgba(56, 189, 248, 0.14) 0%, transparent 44%),
+    radial-gradient(circle at 88% 8%, rgba(99, 102, 241, 0.09) 0%, transparent 38%),
+    radial-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 22px 22px, 66px 66px, 66px 66px;
+}
+
+/* Subtle diagonal carbon/guilloche texture for hero financial cards */
+.card-pattern-mesh {
+  background-image:
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.016) 0px,
+      rgba(255, 255, 255, 0.016) 1px,
+      transparent 1px,
+      transparent 10px
+    ),
+    linear-gradient(165deg, rgba(22, 30, 44, 0.94) 0%, rgba(12, 17, 26, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 18px 40px -24px rgba(0, 0, 0, 0.85);
+}
+
+.surface-glass {
+  background: linear-gradient(180deg, rgba(19, 26, 38, 0.88) 0%, rgba(13, 18, 27, 0.95) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.numpad-key {
+  background: linear-gradient(180deg, rgba(24, 32, 46, 0.95) 0%, rgba(16, 22, 32, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.numpad-key:active {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Clean custom scrollbars for horizontal instrument rail */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes pin-shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  20%, 60% {
+    transform: translateX(-8px);
+  }
+  40%, 80% {
+    transform: translateX(8px);
+  }
+}
+
+.animate-pin-shake {
+  animation: pin-shake 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes cursor-blink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+.animate-cursor-blink {
+  animation: cursor-blink 1s step-end infinite;
+}
+
+@keyframes tick-flash-up {
+  0% {
+    background-color: rgba(16, 185, 129, 0.24);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes tick-flash-down {
+  0% {
+    background-color: rgba(244, 63, 94, 0.24);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-tick-up {
+  animation: tick-flash-up 0.55s ease-out;
+}
+
+.animate-tick-down {
+  animation: tick-flash-down 0.55s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pin-shake,
+  .animate-cursor-blink,
+  .animate-tick-up,
+  .animate-tick-down {
+    animation: none;
+  }
+}
