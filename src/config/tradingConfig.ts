@@ -1,7 +1,7 @@
 /**
  * ============================================================================
- *  LOTFAST v2.1.0 — TRADING CONFIGURATION & MULTI-ASSET STREAMING CATALOG
- *  แก้ไขเวอร์ชัน, โบรกเกอร์ Vantage, คู่เงินหลัก, หุ้น และรหัส PIN ได้ที่นี่
+ *  LOTFAST v2.2.0 — TRADING CONFIGURATION & MULTI-ASSET STREAMING CATALOG
+ *  แก้ไขเวอร์ชัน, โบรกเกอร์ Vantage, ธีมสี, คู่เงินหลัก, หุ้น และรหัส PIN ได้ที่นี่
  * ============================================================================
  */
 
@@ -18,6 +18,40 @@ export type QuoteType =
 export type InputMode = 'USD' | 'PTS';
 export type VantageAccountType = 'RAW' | 'STD';
 export type Mt5LaunchMode = 'app_scheme' | 'universal' | 'web_terminal';
+export type TvLaunchMode = 'app_scheme' | 'chart_link';
+export type AppTheme = 'obsidian-jade' | 'royal-gold' | 'arctic-slate';
+
+export interface AppThemeOption {
+  id: AppTheme;
+  name: string;
+  subtitle: string;
+  themeColor: string;
+  swatch: string;
+}
+
+export const APP_THEMES: AppThemeOption[] = [
+  {
+    id: 'obsidian-jade',
+    name: 'Obsidian Jade',
+    subtitle: 'เขียวมรกตพรีเมียม',
+    themeColor: '#070B14',
+    swatch: '#10E89B',
+  },
+  {
+    id: 'royal-gold',
+    name: 'Royal Gold',
+    subtitle: 'ทองคำหรูหรา',
+    themeColor: '#0A090C',
+    swatch: '#F5B841',
+  },
+  {
+    id: 'arctic-slate',
+    name: 'Arctic Slate',
+    subtitle: 'ฟ้าไอซ์โมเดิร์น',
+    themeColor: '#060B16',
+    swatch: '#38BDF8',
+  },
+];
 
 export interface MetaApiDirectConfig {
   enabled: boolean;
@@ -100,7 +134,7 @@ export interface Mt5Option {
 
 export const APP_CONFIG = {
   /** อัปเดตเลขเวอร์ชันนี้ทุกครั้งที่มีการแก้ไขเพื่อติดตามเวอร์ชันบน iPhone */
-  VERSION: 'v2.1.0',
+  VERSION: 'v2.2.0',
   RELEASE_DATE: '2026-11-25',
   APP_NAME: 'LotFast',
   BROKER_NAME: 'Vantage Markets (USD)',
@@ -621,10 +655,21 @@ export const STORAGE_KEYS = {
   CUSTOM_PAIRS: 'lotfast_custom_pairs_v2',
   VANTAGE_ACCOUNT: 'lotfast_vantage_acct_v2',
   MT5_LAUNCH_MODE: 'lotfast_mt5_launch_v2',
+  TV_LAUNCH_MODE: 'lotfast_tv_launch_v1',
+  THEME: 'lotfast_theme_v1',
   METAAPI_CONFIG: 'lotfast_metaapi_direct_v1',
 } as const;
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: 'v2.2.0',
+    date: '2026-11-25',
+    notes: [
+      'เปลี่ยนปุ่มคีย์ลัดหลักเป็นเปิดแอป TradingView โดยตรง (tradingview://) พร้อมปุ่มเปิดกราฟคู่เงินนั้นใน 1 แตะ',
+      'ออกแบบโลโก้ใหม่ Apex Precision Pulse พร้อมไอคอนหน้าจอโฮม iPhone, อัปเกรดฟอนต์ Outfit + IBM Plex Sans Thai + JetBrains Mono และเพิ่มธีมหรูให้สลับได้ 3 แบบ (Obsidian Jade, Royal Gold, Arctic Slate)',
+      'ล็อกหน้าต่างแอปให้พอดีจอแบบเข้มงวด 100% ห้ามเลื่อนขึ้น-ลง-ซ้าย-ขวา ทั้งบน iPhone และเดสก์ท็อป',
+    ],
+  },
   {
     version: 'v2.1.0',
     date: '2026-11-25',

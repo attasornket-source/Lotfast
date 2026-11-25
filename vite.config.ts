@@ -33,9 +33,9 @@ export default defineConfig(() => {
           name: 'LotFast — Vantage 2nd-Order Lot Calculator',
           short_name: 'LotFast',
           description:
-            'Fast 2nd-Order Position Size Calculator with Vantage Live Bid/Ask, Stale Alerts, Custom Stocks & MT5/TradingView Shortcuts.',
-          theme_color: '#06090F',
-          background_color: '#06090F',
+            'Fast 2nd-Order Position Size Calculator with Vantage Live Bid/Offer, Stale Alerts, Custom Stocks & 1-Tap TradingView App Shortcut.',
+          theme_color: '#070B14',
+          background_color: '#070B14',
           display: 'standalone',
           orientation: 'portrait',
           start_url: './',

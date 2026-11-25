@@ -257,7 +257,7 @@ test('Points mode uses real-time USDJPY rate for JPY pairs and exact Vantage spe
   assert.equal(us30Res.lot2, 0.5);
 });
 
-test('Numpad helper, R:R sanitizer, PIN 0808, and v2.1.0 version', () => {
+test('Numpad helper, R:R sanitizer, PIN 0808, and v2.2.0 version', () => {
   let s = '';
   s = appendNumpadKey(s, '.', 'USD');
   s = appendNumpadKey(s, '7', 'USD');
@@ -272,7 +272,7 @@ test('Numpad helper, R:R sanitizer, PIN 0808, and v2.1.0 version', () => {
   assert.equal(isValidPin('0808'), true);
   assert.equal(isValidPin('12a4'), false);
   assert.equal(APP_CONFIG.DEFAULT_PIN, '0808');
-  assert.equal(APP_CONFIG.VERSION, 'v2.1.0');
+  assert.equal(APP_CONFIG.VERSION, 'v2.2.0');
 });
 
 test('parseRrRatio and Projected Take-Profit calculate 2nd-order, combined, and max-risk TP', () => {

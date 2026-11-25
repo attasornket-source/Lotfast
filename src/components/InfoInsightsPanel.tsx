@@ -69,7 +69,8 @@ interface InfoInsightsPanelProps {
   onClearHistory: () => void;
   onForceUpdate: () => void;
   onOpenMt5: (copyFirst: boolean) => void;
-  onOpenTradingView: () => void;
+  onOpenTradingViewApp: (copyFirst: boolean) => void;
+  onOpenTradingViewChart: () => void;
 }
 
 export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
@@ -94,7 +95,8 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
   onClearHistory,
   onForceUpdate,
   onOpenMt5,
-  onOpenTradingView,
+  onOpenTradingViewApp,
+  onOpenTradingViewChart,
 }) => {
   const [urlCopied, setUrlCopied] = useState(false);
 
@@ -117,17 +119,17 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
   };
 
   return (
-    <div className="surface-glass flex h-full flex-col rounded-2xl border border-white/[0.08]">
+    <div className="surface-glass flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/[0.08]">
       {/* Segmented Navigation Tabs */}
       <div
-        className="flex items-center gap-1 border-b border-white/[0.08] p-2"
+        className="flex shrink-0 items-center gap-1 border-b border-white/[0.08] p-2"
         role="tablist"
         aria-label="ข้อมูลตลาดและการเชื่อมต่อ"
       >
         {(
           [
             { id: 'specs', label: 'กระดาน Bid/Offer & ประวัติ' },
-            { id: 'mt5', label: 'คีย์ลัด & ต่อ MT5' },
+            { id: 'mt5', label: 'TradingView & MT5' },
             { id: 'pwa', label: `ติดตั้ง iPhone · ${APP_CONFIG.VERSION}` },
           ] as const
         ).map((tab) => {
@@ -139,9 +141,9 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
               role="tab"
               aria-selected={active}
               onClick={() => onChangeTab(tab.id)}
-              className={`min-h-[40px] flex-1 whitespace-nowrap rounded-xl px-2.5 py-2 text-xs font-bold transition-colors ${
+              className={`min-h-[38px] flex-1 whitespace-nowrap rounded-xl px-2.5 py-2 text-xs font-bold transition-colors ${
                 active
-                  ? 'bg-white/[0.1] text-slate-100'
+                  ? 'bg-white/[0.11] text-slate-50'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -151,8 +153,8 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
         })}
       </div>
 
-      {/* Tab Body */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+      {/* Tab Body (Internal Scroll Only) */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
         {activeTab === 'specs' && (
           <div className="space-y-5">
             {/* Live Vantage Market Watch Table */}
@@ -337,7 +339,7 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
                 <div className="rounded-xl border border-dashed border-white/[0.09] px-4 py-5 text-center text-xs text-slate-400">
                   ยังไม่มีประวัติ — เมื่อคำนวณและกด{' '}
                   <strong className="text-slate-200">คัดลอก</strong> หรือ{' '}
-                  <strong className="text-slate-200">คัดลอก & เปิด MT5</strong>{' '}
+                  <strong className="text-slate-200">คัดลอก & เปิด TradingView</strong>{' '}
                   รายการจะถูกบันทึกไว้ที่นี่
                 </div>
               ) : (
@@ -408,30 +410,38 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
           <div className="space-y-4">
             {/* Quick Launch Panel */}
             <div className="rounded-xl border border-white/[0.08] bg-[#080C12] p-3.5">
-              <h2 className="text-sm font-bold text-slate-100">
-                ปุ่มคีย์ลัดสลับแอปบน iPhone
+              <h2 className="font-display text-sm font-bold text-slate-100">
+                ปุ่มคีย์ลัดเปิดแอป TradingView & MT5 บน iPhone
               </h2>
               <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                ปุ่ม <strong className="text-slate-200">TradingView</strong> ใช้ iOS Universal Link
-                เปิดตรงเข้ากราฟ <strong className="font-mono text-sky-300">{result.pair.tvSymbol}</strong> บนแอป TradingView อัตโนมัติ ส่วนปุ่ม{' '}
-                <strong className="text-slate-200">MT5</strong> สามารถเลือกโหมดการเปิดได้ในหน้าตั้งค่า (⚙️)
+                ปุ่มหลักบนหน้าจอจะเปิดแอป <strong className="text-slate-200">TradingView</strong> โดยตรง (
+                <code className="font-mono text-slate-300">tradingview://</code>) และปุ่มกราฟจะเปิดตรงเข้ากราฟ{' '}
+                <strong className="font-mono text-sky-300">{result.pair.tvSymbol}</strong> ปรับโหมดได้ในหน้าตั้งค่า (⚙️)
               </p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-3 grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => onOpenMt5(false)}
-                  className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border border-emerald-400/35 bg-emerald-500/[0.12] px-3 text-xs font-bold text-emerald-300 hover:bg-emerald-500/[0.2]"
+                  onClick={() => onOpenTradingViewApp(false)}
+                  className="inline-flex min-h-[40px] items-center justify-center gap-1 rounded-xl border border-[var(--lf-accent-border)] bg-[var(--lf-accent-soft)] px-2 text-xs font-bold text-slate-100 hover:brightness-110"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>ทดสอบเปิด MT5</span>
+                  <ExternalLink className="accent-text h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">แอป TV</span>
                 </button>
                 <button
                   type="button"
-                  onClick={onOpenTradingView}
-                  className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border border-sky-400/35 bg-sky-500/[0.12] px-3 text-xs font-bold text-sky-300 hover:bg-sky-500/[0.2]"
+                  onClick={onOpenTradingViewChart}
+                  className="inline-flex min-h-[40px] items-center justify-center gap-1 rounded-xl border border-sky-400/35 bg-sky-500/[0.12] px-2 text-xs font-bold text-sky-300 hover:bg-sky-500/[0.2]"
                 >
-                  <CandlestickChart className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>เปิดกราฟ {result.pair.label}</span>
+                  <CandlestickChart className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">กราฟ {result.pair.label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenMt5(false)}
+                  className="inline-flex min-h-[40px] items-center justify-center gap-1 rounded-xl border border-white/[0.1] bg-white/[0.05] px-2 text-xs font-bold text-slate-200 hover:bg-white/[0.1]"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                  <span className="truncate">เปิด MT5</span>
                 </button>
               </div>
             </div>
@@ -525,7 +535,7 @@ export const InfoInsightsPanel: React.FC<InfoInsightsPanelProps> = ({
                   3. เลื่อนลงแล้วเลือก <strong>เพิ่มไปยังหน้าจอโฮม (Add to Home Screen)</strong>
                 </li>
                 <li>
-                  4. กด <strong>เพิ่ม (Add)</strong> มุมขวาบน — ไอคอน <strong>LF</strong> จะขึ้นบนหน้าจอโฮม เปิดเต็มจอไร้แถบ Safari ทันที
+                  4. กด <strong>เพิ่ม (Add)</strong> มุมขวาบน — ไอคอน <strong>LotFast</strong> โฉมใหม่จะขึ้นบนหน้าจอโฮม เปิดเต็มจอไร้แถบ Safari ทันที
                 </li>
               </ol>
 

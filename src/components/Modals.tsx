@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Download,
+  Palette,
   Radio,
   RefreshCw,
   Share,
@@ -8,8 +9,11 @@ import {
 } from 'lucide-react';
 import {
   APP_CONFIG,
+  APP_THEMES,
+  type AppTheme,
   type MetaApiDirectConfig,
   type Mt5LaunchMode,
+  type TvLaunchMode,
   type VantageAccountType,
 } from '../config/tradingConfig';
 import { isValidPin } from '../utils/calculator';
@@ -130,7 +134,7 @@ export const RiskLimitModal: React.FC<RiskModalProps> = ({
           </div>
           <button
             type="submit"
-            className="min-h-[48px] w-full rounded-xl bg-emerald-400 px-4 py-3 text-sm font-extrabold text-[#04140D] transition-colors hover:bg-emerald-300 active:scale-[0.98]"
+            className="accent-cta min-h-[48px] w-full rounded-xl px-4 py-3 text-sm font-extrabold transition-all hover:brightness-110 active:scale-[0.98]"
           >
             บันทึก Risk Limit
           </button>
@@ -146,6 +150,10 @@ interface SettingsModalProps {
   onSavePin: (newPin: string) => void;
   onForceUpdate: () => void;
   usdJpyRate: number;
+  theme: AppTheme;
+  onChangeTheme: (nextTheme: AppTheme) => void;
+  tvLaunchMode: TvLaunchMode;
+  onChangeTvLaunchMode: (mode: TvLaunchMode) => void;
   vantageAccountType: VantageAccountType;
   onChangeVantageAccountType: (type: VantageAccountType) => void;
   mt5LaunchMode: Mt5LaunchMode;
@@ -160,6 +168,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSavePin,
   onForceUpdate,
   usdJpyRate,
+  theme,
+  onChangeTheme,
+  tvLaunchMode,
+  onChangeTvLaunchMode,
   vantageAccountType,
   onChangeVantageAccountType,
   mt5LaunchMode,
@@ -238,11 +250,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/[0.1] bg-[#0F1520] p-5 pb-safe sm:rounded-2xl">
+      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl border border-white/[0.1] bg-[#0F1520] p-5 pb-safe sm:rounded-2xl">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-700 sm:hidden" />
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-slate-100">
-            ตั้งค่า & ฟีดราคา Vantage
+          <h2 className="font-display text-base font-bold text-slate-100">
+            ตั้งค่าธีม & ฟีดราคา Vantage
           </h2>
           <button
             type="button"
@@ -254,11 +266,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
+        {/* Luxury Theme Selector */}
+        <div className="mt-4">
+          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-300">
+            <Palette className="accent-text h-3.5 w-3.5" aria-hidden="true" />
+            <span>ธีมสีแอป (Luxury Theme)</span>
+          </span>
+          <div className="grid grid-cols-3 gap-2">
+            {APP_THEMES.map((t) => {
+              const active = theme === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  data-testid={`theme-opt-${t.id}`}
+                  onClick={() => onChangeTheme(t.id)}
+                  aria-pressed={active}
+                  className={`flex flex-col items-start rounded-xl border px-2.5 py-2 text-left transition-all ${
+                    active
+                      ? 'accent-pill-active'
+                      : 'border-white/[0.08] bg-[#080C12] text-slate-300 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: t.swatch }}
+                      aria-hidden="true"
+                    />
+                    <span className="font-display text-[11px] font-bold leading-tight">
+                      {t.name.split(' ')[0]}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 text-[10px] text-slate-400">
+                    {t.subtitle}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* System Spec Summary */}
         <div className="mt-3.5 space-y-1.5 rounded-xl border border-white/[0.07] bg-[#080C12] p-3 text-xs">
           <div className="flex justify-between">
             <span className="text-slate-400">เวอร์ชันแอป</span>
-            <strong className="font-mono text-emerald-300">
+            <strong className="accent-text font-mono">
               {APP_CONFIG.VERSION} ({APP_CONFIG.RELEASE_DATE})
             </strong>
           </div>
@@ -268,10 +321,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <div className="flex justify-between">
             <span className="text-slate-400">เรท USDJPY สด</span>
-            <strong className="font-mono text-emerald-400 tabular-nums">
+            <strong className="accent-text font-mono tabular-nums">
               {usdJpyRate.toFixed(3)}
             </strong>
           </div>
+        </div>
+
+        {/* TradingView Shortcut Launch Mode */}
+        <div className="mt-4">
+          <label
+            htmlFor="tv-launch-mode"
+            className="mb-1.5 block text-xs font-medium text-slate-400"
+          >
+            รูปแบบปุ่มคีย์ลัดเปิดแอป TradingView บน iPhone
+          </label>
+          <select
+            id="tv-launch-mode"
+            value={tvLaunchMode}
+            onChange={(e) => onChangeTvLaunchMode(e.target.value as TvLaunchMode)}
+            className="w-full rounded-xl border border-white/[0.1] bg-[#080C12] px-3 py-2.5 text-base font-semibold text-slate-100 outline-none focus:border-[var(--lf-accent-border)] sm:text-xs"
+          >
+            <option value="app_scheme" className="bg-[#0F1520]">
+              เปิดแอป TradingView โดยตรง (tradingview://) — แนะนำสำหรับ iPhone
+            </option>
+            <option value="chart_link" className="bg-[#0F1520]">
+              เปิดตรงเข้ากราฟคู่เงินนั้น (TradingView Universal Link)
+            </option>
+          </select>
         </div>
 
         {/* Vantage Account Type Switch */}
@@ -398,18 +474,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* MT5 Shortcut Launch Mode */}
         <div className="mt-4">
-          <label
-            htmlFor="mt5-launch-mode"
-            className="mb-1.5 block text-xs font-medium text-slate-400"
-          >
-            รูปแบบปุ่มคีย์ลัดเปิดแอป MT5 บน iPhone
-          </label>
-          <select
-            id="mt5-launch-mode"
-            value={mt5LaunchMode}
-            onChange={(e) => onChangeMt5LaunchMode(e.target.value as Mt5LaunchMode)}
-            className="w-full rounded-xl border border-white/[0.1] bg-[#080C12] px-3 py-2.5 text-xs font-semibold text-slate-100 outline-none focus:border-emerald-400"
-          >
+            <label
+              htmlFor="mt5-launch-mode"
+              className="mb-1.5 block text-xs font-medium text-slate-400"
+            >
+              รูปแบบลิงก์เปิดแอป MT5 (ในแท็บต่อ MT5)
+            </label>
+            <select
+              id="mt5-launch-mode"
+              value={mt5LaunchMode}
+              onChange={(e) => onChangeMt5LaunchMode(e.target.value as Mt5LaunchMode)}
+              className="w-full rounded-xl border border-white/[0.1] bg-[#080C12] px-3 py-2.5 text-base font-semibold text-slate-100 outline-none focus:border-[var(--lf-accent-border)] sm:text-xs"
+            >
             <option value="app_scheme" className="bg-[#0F1520]">
               เปิดแอป MT5 โดยตรง (metatrader5://) — แนะนำสำหรับ iPhone
             </option>

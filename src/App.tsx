@@ -9,13 +9,16 @@ import {
 import { registerSW } from 'virtual:pwa-register';
 import {
   APP_CONFIG,
+  APP_THEMES,
   STORAGE_KEYS,
   getPairById,
+  type AppTheme,
   type InputMode,
   type MetaApiDirectConfig,
   type Mt5LaunchMode,
   type PairId,
   type PairSpec,
+  type TvLaunchMode,
   type VantageAccountType,
 } from './config/tradingConfig';
 import {
@@ -24,9 +27,14 @@ import {
   calculateSecondOrder,
   formatLot,
 } from './utils/calculator';
-import { buildMt5LaunchUrl, buildTradingViewUrl } from './utils/quoteParser';
+import {
+  buildMt5LaunchUrl,
+  buildTradingViewAppUrl,
+  buildTradingViewUrl,
+} from './utils/quoteParser';
 import { useMarketQuotes } from './hooks/useMarketQuotes';
 import { useOnlineStatus } from './hooks/usePWAInstall';
+import { LotFastLogo } from './components/LotFastLogo';
 import { PinLockScreen } from './components/PinLockScreen';
 import { CalculatorTerminal } from './components/CalculatorTerminal';
 import {
@@ -155,6 +163,34 @@ function readInitialMt5Mode(): Mt5LaunchMode {
   return 'app_scheme';
 }
 
+function readInitialTvMode(): TvLaunchMode {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.TV_LAUNCH_MODE);
+    if (saved === 'app_scheme' || saved === 'chart_link') {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'app_scheme';
+}
+
+function readInitialTheme(): AppTheme {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.THEME);
+    if (
+      saved === 'obsidian-jade' ||
+      saved === 'royal-gold' ||
+      saved === 'arctic-slate'
+    ) {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'obsidian-jade';
+}
+
 function readInitialMetaApiConfig(): MetaApiDirectConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.METAAPI_CONFIG);
@@ -203,6 +239,9 @@ export default function App() {
     useState<VantageAccountType>(readInitialVantageAccount);
   const [mt5LaunchMode, setMt5LaunchMode] =
     useState<Mt5LaunchMode>(readInitialMt5Mode);
+  const [tvLaunchMode, setTvLaunchMode] =
+    useState<TvLaunchMode>(readInitialTvMode);
+  const [theme, setTheme] = useState<AppTheme>(readInitialTheme);
   const [metaApiConfig, setMetaApiConfig] =
     useState<MetaApiDirectConfig>(readInitialMetaApiConfig);
 
@@ -245,6 +284,15 @@ export default function App() {
       if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    const matched = APP_THEMES.find((t) => t.id === theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && matched) {
+      meta.setAttribute('content', matched.themeColor);
+    }
+  }, [theme]);
 
   useEffect(() => {
     try {
@@ -439,6 +487,31 @@ export default function App() {
     }
   }, []);
 
+  const handleChangeTvLaunchMode = useCallback((launchMode: TvLaunchMode) => {
+    setTvLaunchMode(launchMode);
+    try {
+      localStorage.setItem(STORAGE_KEYS.TV_LAUNCH_MODE, launchMode);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleChangeTheme = useCallback(
+    (nextTheme: AppTheme) => {
+      setTheme(nextTheme);
+      try {
+        localStorage.setItem(STORAGE_KEYS.THEME, nextTheme);
+      } catch {
+        // ignore
+      }
+      const matched = APP_THEMES.find((t) => t.id === nextTheme);
+      if (matched) {
+        showToast(`เปลี่ยนธีมเป็น ${matched.name} แล้ว`);
+      }
+    },
+    [showToast]
+  );
+
   const handleSaveMetaApiConfig = useCallback((cfg: MetaApiDirectConfig) => {
     setMetaApiConfig(cfg);
     try {
@@ -535,7 +608,27 @@ export default function App() {
     [handleCopyLot, mt5LaunchMode, result, showToast]
   );
 
-  const handleOpenTradingView = useCallback(() => {
+  const handleOpenTradingViewApp = useCallback(
+    async (copyFirst: boolean) => {
+      if (copyFirst && result.status === 'OK') {
+        await handleCopyLot();
+      }
+      const url = buildTradingViewAppUrl(tvLaunchMode, activePair);
+      showToast(
+        copyFirst && result.status === 'OK'
+          ? `คัดลอก ${formatLot(result.lot2, result.pair)} แล้ว — กำลังเปิด TradingView`
+          : 'กำลังเปิดแอป TradingView...'
+      );
+      if (tvLaunchMode === 'app_scheme') {
+        window.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    },
+    [activePair, handleCopyLot, result, showToast, tvLaunchMode]
+  );
+
+  const handleOpenTradingViewChart = useCallback(() => {
     const url = buildTradingViewUrl(activePair);
     showToast(`กำลังเปิดกราฟ ${activePair.label} บน TradingView...`);
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -645,25 +738,23 @@ export default function App() {
 
   return (
     <div
-      className={`flex h-dvh flex-col overflow-hidden text-[#F1F5F9] transition-colors duration-300 lg:h-auto lg:min-h-dvh lg:overflow-visible ${bgThemeClass}`}
+      data-theme={theme}
+      className={`fixed inset-0 flex h-dvh w-full flex-col overflow-hidden overscroll-none text-[#F8FAFC] transition-colors duration-300 ${bgThemeClass}`}
     >
       {/* Private 4-Digit PIN Gate */}
       {!isUnlocked && (
-        <PinLockScreen expectedPin={pinCode} onUnlock={handleUnlock} />
+        <PinLockScreen expectedPin={pinCode} theme={theme} onUnlock={handleUnlock} />
       )}
 
-      {/* Compact Top Bar (44px on mobile -> maximizes 1-screen iPhone fit!) */}
-      <header className="shrink-0 border-b border-white/[0.08] bg-[#06090F]/85 backdrop-blur-md pt-safe lg:sticky lg:top-0 lg:z-30">
-        <div className="mx-auto flex h-11 max-w-6xl items-center justify-between gap-2 px-3 sm:px-6 lg:h-14">
-          {/* Zone 1: Brand Wordmark */}
+      {/* Compact Top Bar (44px on mobile, 52px on desktop -> Strict Zero-Scroll Viewport Fit) */}
+      <header className="shrink-0 border-b border-white/[0.08] bg-[#070B14]/85 backdrop-blur-md pt-safe">
+        <div className="mx-auto flex h-11 max-w-6xl items-center justify-between gap-2 px-3 sm:px-6 lg:h-[52px]">
+          {/* Zone 1: Apex Precision Pulse Brand Logo */}
           <a
             href="#calculator"
-            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base font-extrabold tracking-tight text-slate-100 lg:text-lg"
+            className="flex shrink-0 items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--lf-accent)] rounded-lg"
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-400/35 bg-emerald-500/[0.14] font-mono text-[11px] font-extrabold text-emerald-400 lg:h-7 lg:w-7 lg:text-xs">
-              LF
-            </span>
-            <span>{APP_CONFIG.APP_NAME}</span>
+            <LotFastLogo size="sm" theme={theme} />
           </a>
 
           {/* Zone 2: Quiet Broker & Version Context (Desktop) */}
@@ -687,13 +778,13 @@ export default function App() {
               type="button"
               onClick={() => setRiskModalOpen(true)}
               aria-label={`แก้ไข Risk Limit ปัจจุบัน ${riskUsd} ดอลลาร์`}
-              className="inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-400/25 bg-emerald-500/[0.1] px-2.5 text-xs font-bold text-slate-100 transition-colors hover:bg-emerald-500/[0.18] active:scale-[0.96] lg:h-9"
+              className="inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-[var(--lf-accent-border)] bg-[var(--lf-accent-soft)] px-2.5 text-xs font-bold text-slate-100 transition-all hover:brightness-110 active:scale-[0.96] lg:h-9"
             >
-              <span className="text-[11px] font-medium text-slate-400">Risk</span>
-              <span className="font-mono text-emerald-400 tabular-nums">
+              <span className="text-[11px] font-medium text-slate-300">Risk</span>
+              <span className="accent-text font-mono tabular-nums">
                 ${riskUsd}
               </span>
-              <Pencil className="h-3 w-3 text-slate-400" aria-hidden="true" />
+              <Pencil className="h-3 w-3 text-slate-300" aria-hidden="true" />
             </button>
 
             <div className="hidden sm:block">
@@ -723,13 +814,13 @@ export default function App() {
 
       {/* Auto-Update Banner (Only when a new Service Worker is waiting) */}
       {updateAvailable && (
-        <div className="shrink-0 border-b border-emerald-500/30 bg-emerald-500/[0.14]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-1.5 text-[11px] text-emerald-200 sm:px-6">
+        <div className="shrink-0 border-b border-[var(--lf-accent-border)] bg-[var(--lf-accent-soft)]">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-1.5 text-[11px] text-slate-100 sm:px-6">
             <span>พบเวอร์ชันใหม่พร้อมใช้งาน</span>
             <button
               type="button"
               onClick={handleForceUpdate}
-              className="whitespace-nowrap rounded-md bg-emerald-400 px-2.5 py-0.5 font-bold text-[#04140D]"
+              className="accent-cta whitespace-nowrap rounded-md px-2.5 py-0.5 font-bold"
             >
               อัปเดตทันที
             </button>
@@ -737,14 +828,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content Workspace: Exact 1-Screen Flex Fit on Mobile, Spacious 2-Col on Desktop */}
+      {/* Main Content Workspace: Strict Zero-Scroll Fit on BOTH iPhone and Desktop */}
       <main
         id="calculator"
-        className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-3 pb-2 pt-2 sm:px-6 lg:block lg:py-6 pb-safe"
+        className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-hidden px-3 pb-2 pt-2 sm:px-6 lg:py-4 pb-safe"
       >
-        <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-12 lg:items-stretch lg:gap-6">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-12 lg:items-stretch lg:gap-5">
           {/* Left Column: Primary One-Handed Calculator Terminal */}
-          <div className="flex min-h-0 flex-1 flex-col lg:col-span-5">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:col-span-5">
             <CalculatorTerminal
               pairs={allPairs}
               pairId={pairId}
@@ -767,8 +858,8 @@ export default function App() {
               projectedTp={projectedTp}
               copiedLot={copiedLot}
               onCopyLot={handleCopyLot}
-              onOpenMt5={handleOpenMt5}
-              onOpenTradingView={handleOpenTradingView}
+              onOpenTradingViewApp={handleOpenTradingViewApp}
+              onOpenTradingViewChart={handleOpenTradingViewChart}
             />
 
             {/* Compact Bottom Dock on iPhone (36px) */}
@@ -778,7 +869,7 @@ export default function App() {
                 onClick={() => openMobileTab('specs')}
                 className="surface-glass flex h-[36px] items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-[11px] font-semibold text-slate-200 active:scale-[0.97]"
               >
-                <BookOpen className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+                <BookOpen className="accent-text h-3.5 w-3.5" aria-hidden="true" />
                 <span>กระดาน & ประวัติ</span>
               </button>
               <button
@@ -786,7 +877,7 @@ export default function App() {
                 onClick={() => openMobileTab('mt5')}
                 className="surface-glass flex h-[36px] items-center justify-center whitespace-nowrap rounded-xl border border-white/[0.08] px-2 text-[11px] font-semibold text-slate-200 active:scale-[0.97]"
               >
-                ต่อ MT5
+                TV & MT5
               </button>
               <button
                 type="button"
@@ -798,8 +889,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Column (Desktop): Market Board, History, MT5 Guide & iPhone PWA */}
-          <div className="hidden lg:col-span-7 lg:block">
+          {/* Right Column (Desktop): Market Board, History, TradingView/MT5 Guide & iPhone PWA */}
+          <div className="hidden min-h-0 overflow-hidden lg:col-span-7 lg:flex lg:flex-col">
             <InfoInsightsPanel
               activeTab={infoTab}
               onChangeTab={setInfoTab}
@@ -822,15 +913,16 @@ export default function App() {
               onClearHistory={handleClearHistory}
               onForceUpdate={handleForceUpdate}
               onOpenMt5={handleOpenMt5}
-              onOpenTradingView={handleOpenTradingView}
+              onOpenTradingViewApp={handleOpenTradingViewApp}
+              onOpenTradingViewChart={handleOpenTradingViewChart}
             />
           </div>
         </div>
 
-        {/* Quiet Editorial Footer (Desktop Only) */}
-        <footer className="mt-6 hidden items-center justify-between border-t border-white/[0.07] pt-3.5 text-xs text-slate-500 lg:flex">
+        {/* Quiet Editorial Footer (Desktop Only — Shrink-0, Zero Page Overflow) */}
+        <footer className="mt-3 hidden shrink-0 items-center justify-between border-t border-white/[0.07] pt-2.5 text-xs text-slate-500 lg:flex">
           <div className="flex items-center gap-2">
-            <span>{APP_CONFIG.APP_NAME}</span>
+            <span className="font-display font-semibold text-slate-300">{APP_CONFIG.APP_NAME}</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono">{APP_CONFIG.VERSION}</span>
             <span aria-hidden="true">·</span>
@@ -844,7 +936,7 @@ export default function App() {
       {toastMsg && (
         <div
           role="status"
-          className="pointer-events-none fixed bottom-14 left-1/2 z-[70] -translate-x-1/2 whitespace-nowrap rounded-full border border-emerald-400/35 bg-[#0D1623]/95 px-4 py-1.5 text-xs font-bold text-emerald-200 shadow-2xl backdrop-blur-md"
+          className="pointer-events-none fixed bottom-14 left-1/2 z-[70] -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--lf-accent-border)] bg-[#0D1623]/95 px-4 py-1.5 text-xs font-bold text-slate-100 shadow-2xl backdrop-blur-md"
         >
           {toastMsg}
         </div>
@@ -856,15 +948,15 @@ export default function App() {
           className="fixed inset-0 z-50 flex items-end bg-black/75 backdrop-blur-sm lg:hidden"
           role="dialog"
           aria-modal="true"
-          aria-label="ข้อมูลตลาด คีย์ลัด MT5 และการติดตั้ง iPhone"
+          aria-label="ข้อมูลตลาด คีย์ลัด TradingView และการติดตั้ง iPhone"
           onClick={(e) => {
             if (e.target === e.currentTarget) setMobileSheetOpen(false);
           }}
         >
-          <div className="flex max-h-[86dvh] w-full flex-col rounded-t-3xl border-t border-white/[0.1] bg-[#0F1520] pb-safe">
-            <div className="flex items-center justify-between px-4 pb-2 pt-3">
-              <span className="text-sm font-bold text-slate-100">
-                กระดานราคา · MT5 · ติดตั้ง iPhone
+          <div className="flex h-[84dvh] max-h-[84dvh] w-full flex-col overflow-hidden rounded-t-3xl border-t border-white/[0.1] bg-[#0F1520] pb-safe">
+            <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
+              <span className="font-display text-sm font-bold text-slate-100">
+                กระดานราคา · TradingView · ติดตั้ง iPhone
               </span>
               <button
                 type="button"
@@ -875,7 +967,7 @@ export default function App() {
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-4">
+            <div className="min-h-0 flex-1 overflow-hidden px-2 pb-3">
               <InfoInsightsPanel
                 activeTab={infoTab}
                 onChangeTab={setInfoTab}
@@ -904,7 +996,8 @@ export default function App() {
                 onClearHistory={handleClearHistory}
                 onForceUpdate={handleForceUpdate}
                 onOpenMt5={handleOpenMt5}
-                onOpenTradingView={handleOpenTradingView}
+                onOpenTradingViewApp={handleOpenTradingViewApp}
+                onOpenTradingViewChart={handleOpenTradingViewChart}
               />
             </div>
           </div>
@@ -918,6 +1011,7 @@ export default function App() {
         onClose={() => setSymbolModalOpen(false)}
         onAddPair={handleAddPair}
         onRemovePair={handleRemovePair}
+        onSelectPair={handleSelectPair}
       />
 
       {/* Risk Limit Modal */}
@@ -928,13 +1022,17 @@ export default function App() {
         onSave={handleSaveRisk}
       />
 
-      {/* Settings & PIN Modal */}
+      {/* Settings, Theme & PIN Modal */}
       <SettingsModal
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         onSavePin={handleSavePin}
         onForceUpdate={handleForceUpdate}
         usdJpyRate={rates.USDJPY}
+        theme={theme}
+        onChangeTheme={handleChangeTheme}
+        tvLaunchMode={tvLaunchMode}
+        onChangeTvLaunchMode={handleChangeTvLaunchMode}
         vantageAccountType={vantageAccountType}
         onChangeVantageAccountType={handleChangeVantageAccountType}
         mt5LaunchMode={mt5LaunchMode}

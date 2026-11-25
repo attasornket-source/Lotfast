@@ -22,6 +22,7 @@ interface SymbolManagerModalProps {
   onClose: () => void;
   onAddPair: (pair: PairSpec) => void;
   onRemovePair: (pairId: string) => void;
+  onSelectPair?: (pairId: string) => void;
 }
 
 type LibraryFilter = 'all' | 'stock' | 'index_metal' | 'forex_crypto';
@@ -138,6 +139,7 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
   onClose,
   onAddPair,
   onRemovePair,
+  onSelectPair,
 }) => {
   const [tab, setTab] = useState<'presets' | 'custom'>('presets');
   const [filter, setFilter] = useState<LibraryFilter>('all');
@@ -316,7 +318,7 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-3.5">
           <div>
-            <h2 className="text-base font-bold text-slate-100">
+            <h2 className="font-display text-base font-bold text-slate-100">
               เพิ่มหุ้น / สินทรัพย์เทรด
             </h2>
             <p className="text-xs text-slate-400">
@@ -340,7 +342,7 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
             onClick={() => setTab('presets')}
             className={`min-h-[38px] flex-1 rounded-xl text-xs font-bold transition-colors ${
               tab === 'presets'
-                ? 'bg-emerald-400 text-[#04140D]'
+                ? 'accent-cta'
                 : 'bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]'
             }`}
           >
@@ -351,7 +353,7 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
             onClick={() => setTab('custom')}
             className={`min-h-[38px] flex-1 rounded-xl text-xs font-bold transition-colors ${
               tab === 'custom'
-                ? 'bg-emerald-400 text-[#04140D]'
+                ? 'accent-cta'
                 : 'bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]'
             }`}
           >
@@ -360,7 +362,7 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {tab === 'presets' ? (
             <div className="space-y-3.5">
               {/* Search + Category Filter */}
@@ -463,19 +465,33 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
               {customAddedPairs.length > 0 && (
                 <div className="border-t border-white/[0.07] pt-3">
                   <p className="mb-2 text-xs font-semibold text-slate-300">
-                    หุ้น/สินทรัพย์ที่เพิ่มไว้ ({customAddedPairs.length})
+                    หุ้น/สินทรัพย์ที่เพิ่มไว้ ({customAddedPairs.length}) — แตะชื่อเพื่อเลือกเทรด หรือแตะถังขยะเพื่อลบ
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {customAddedPairs.map((p) => (
-                      <button
+                      <div
                         key={p.id}
-                        type="button"
-                        onClick={() => onRemovePair(p.id)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.09] bg-[#0A0F17] px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-rose-500/40 hover:text-rose-300"
+                        className="inline-flex items-center overflow-hidden rounded-lg border border-white/[0.09] bg-[#0A0F17] text-xs font-semibold text-slate-200"
                       >
-                        <span>{p.label}</span>
-                        <Trash2 className="h-3 w-3 text-slate-500" aria-hidden="true" />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectPair?.(p.id);
+                            onClose();
+                          }}
+                          className="px-2.5 py-1.5 hover:bg-white/[0.06]"
+                        >
+                          {p.label}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onRemovePair(p.id)}
+                          aria-label={`ลบ ${p.label}`}
+                          className="border-l border-white/[0.07] px-2 py-1.5 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+                        >
+                          <Trash2 className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -647,7 +663,7 @@ export const SymbolManagerModal: React.FC<SymbolManagerModalProps> = ({
               <button
                 type="submit"
                 data-testid="submit-custom-pair"
-                className="min-h-[48px] w-full rounded-xl bg-emerald-400 px-4 py-3 text-sm font-extrabold text-[#04140D] transition-colors hover:bg-emerald-300 active:scale-[0.98]"
+                className="accent-cta min-h-[48px] w-full rounded-xl px-4 py-3 text-sm font-extrabold transition-all hover:brightness-110 active:scale-[0.98]"
               >
                 บันทึกและเลือกสินทรัพย์นี้ทันที
               </button>

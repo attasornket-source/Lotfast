@@ -216,9 +216,9 @@ export const BidOfferDeck: React.FC<BidOfferDeckProps> = ({
         {/* SELL / BID */}
         <div
           key={`bid-${quote?.tickSeq ?? 0}`}
-          className={`flex flex-col justify-between rounded-xl border border-rose-500/25 bg-gradient-to-br from-rose-500/[0.12] via-[#130C12] to-[#090D14] px-2.5 py-1.5 ${tickAnimClass}`}
+          className={`flex flex-col justify-between rounded-xl border border-rose-500/25 bg-gradient-to-br from-rose-500/[0.13] via-[#130C15] to-[#070B13] px-2.5 py-1.5 ${tickAnimClass}`}
         >
-          <div className="flex items-center justify-between text-[9.5px] font-bold tracking-wider text-rose-300/90">
+          <div className="font-display flex items-center justify-between text-[9.5px] font-bold tracking-wider text-rose-300/90">
             <span>BID · ขาย</span>
             {dir === 'up' ? (
               <ArrowUpRight className="h-3 w-3 text-emerald-400" aria-hidden="true" />
@@ -233,7 +233,7 @@ export const BidOfferDeck: React.FC<BidOfferDeckProps> = ({
             <span className="text-xs font-semibold text-rose-200/75 sm:text-sm">
               {bidParts.prefix}
             </span>
-            <span className="text-[22px] font-extrabold leading-none tracking-tight text-rose-100 sm:text-2xl">
+            <span className="text-[22px] font-extrabold leading-none tracking-tight text-rose-50 sm:text-2xl">
               {bidParts.bigDigits}
             </span>
             {bidParts.superDigit && (
@@ -247,14 +247,14 @@ export const BidOfferDeck: React.FC<BidOfferDeckProps> = ({
         {/* Dedicated Center Spread Column (Never overlaps Bid/Offer text!) */}
         <div
           aria-label="ค่าสเปรดปัจจุบัน"
-          className="flex flex-col items-center justify-center rounded-lg border border-white/[0.08] bg-[#080C12] px-1.5 py-1 text-center"
+          className="flex flex-col items-center justify-center rounded-lg border border-white/[0.08] bg-[#070B13]/90 px-1.5 py-1 text-center"
         >
-          <span className="text-[8.5px] font-semibold uppercase tracking-wider text-slate-500">
+          <span className="font-display text-[8.5px] font-bold uppercase tracking-wider text-slate-400">
             SPD
           </span>
           <span
             data-testid="live-spread"
-            className="mt-0.5 whitespace-nowrap font-mono text-[10.5px] font-bold text-slate-200 tabular-nums"
+            className="mt-0.5 whitespace-nowrap font-mono text-[10.5px] font-bold text-slate-100 tabular-nums"
           >
             {quote ? quote.spreadFormatted : '--'}
           </span>
@@ -263,9 +263,9 @@ export const BidOfferDeck: React.FC<BidOfferDeckProps> = ({
         {/* BUY / OFFER (ASK) */}
         <div
           key={`ask-${quote?.tickSeq ?? 0}`}
-          className={`flex flex-col justify-between rounded-xl border border-emerald-500/25 bg-gradient-to-bl from-emerald-500/[0.12] via-[#0B1513] to-[#090D14] px-2.5 py-1.5 text-right ${tickAnimClass}`}
+          className={`flex flex-col justify-between rounded-xl border border-emerald-500/25 bg-gradient-to-bl from-emerald-500/[0.13] via-[#0B1715] to-[#070B13] px-2.5 py-1.5 text-right ${tickAnimClass}`}
         >
-          <div className="flex items-center justify-between text-[9.5px] font-bold tracking-wider text-emerald-300/90">
+          <div className="font-display flex items-center justify-between text-[9.5px] font-bold tracking-wider text-emerald-300/90">
             {dir === 'up' ? (
               <ArrowUpRight className="h-3 w-3 text-emerald-400" aria-hidden="true" />
             ) : dir === 'down' ? (
@@ -282,7 +282,7 @@ export const BidOfferDeck: React.FC<BidOfferDeckProps> = ({
             <span className="text-xs font-semibold text-emerald-200/75 sm:text-sm">
               {askParts.prefix}
             </span>
-            <span className="text-[22px] font-extrabold leading-none tracking-tight text-emerald-100 sm:text-2xl">
+            <span className="text-[22px] font-extrabold leading-none tracking-tight text-emerald-50 sm:text-2xl">
               {askParts.bigDigits}
             </span>
             {askParts.superDigit && (

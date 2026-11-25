@@ -2,6 +2,7 @@ import {
   APP_CONFIG,
   type Mt5LaunchMode,
   type PairSpec,
+  type TvLaunchMode,
   type VantageAccountType,
 } from '../config/tradingConfig';
 
@@ -386,4 +387,11 @@ export function buildMt5LaunchUrl(mode: Mt5LaunchMode): string {
 
 export function buildTradingViewUrl(pair: PairSpec): string {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(pair.tvSymbol)}`;
+}
+
+export function buildTradingViewAppUrl(mode: TvLaunchMode, pair: PairSpec): string {
+  if (mode === 'chart_link') {
+    return buildTradingViewUrl(pair);
+  }
+  return 'tradingview://';
 }

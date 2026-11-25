@@ -4,6 +4,7 @@ import { PRESET_INSTRUMENTS, getPairById } from '../config/tradingConfig';
 import {
   buildMt5LaunchUrl,
   buildStreamingTickQuote,
+  buildTradingViewAppUrl,
   buildTradingViewUrl,
   evaluateFeedHealth,
   normalizeScannerQuote,
@@ -187,6 +188,14 @@ test('splitDealingPrice and MT5/TradingView URL builders work cleanly', () => {
     superDigit: '4',
   });
   assert.equal(buildMt5LaunchUrl('app_scheme'), 'metatrader5://');
+  assert.equal(
+    buildTradingViewAppUrl('app_scheme', getPairById('USDJPY')),
+    'tradingview://'
+  );
+  assert.equal(
+    buildTradingViewAppUrl('chart_link', getPairById('USDJPY')),
+    'https://www.tradingview.com/chart/?symbol=VANTAGE%3AUSDJPY'
+  );
   assert.equal(
     buildTradingViewUrl(getPairById('USDJPY')),
     'https://www.tradingview.com/chart/?symbol=VANTAGE%3AUSDJPY'
